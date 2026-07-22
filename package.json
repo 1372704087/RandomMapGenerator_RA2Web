@@ -1,0 +1,14 @@
+{
+  "name": "ra2-web-mapgen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "红警2随机地图生成器 - 网页版",
+  "scripts": {
+    "build:core": "pnpm --filter @ra2/core build",
+    "build:server": "pnpm --filter @ra2/server build",
+    "build:web": "pnpm --filter @ra2/web build",
+    "dev:server": "pnpm --filter @ra2/server dev",
+    "dev:web": "pnpm --filter @ra2/web dev",
+    "test:core": "pnpm --filter @ra2/core test"
+  }
+}

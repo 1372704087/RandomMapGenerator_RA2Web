@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.yrm
+temp/
+.vite/
+*.local
+.env
+.env.local

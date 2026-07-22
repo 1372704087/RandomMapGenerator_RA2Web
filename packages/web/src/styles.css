@@ -1,0 +1,422 @@
+/* ============================================================
+   红警2 随机地图生成器 - 军事风格样式
+   ============================================================ */
+
+:root {
+  --bg-dark: #1a1a2e;
+  --bg-panel: #16213e;
+  --bg-panel-light: #1f2b4d;
+  --bg-input: #0f1729;
+  --gold: #ffd700;
+  --gold-dim: #c5a059;
+  --gold-dark: #8a6f3a;
+  --text: #e8e8e8;
+  --text-dim: #a8a8b8;
+  --border: #c5a059;
+  --border-dim: #5a4a2a;
+  --success: #4ade80;
+  --error: #ef4444;
+  --warning: #fbbf24;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  min-height: 100vh;
+  background: var(--bg-dark);
+  color: var(--text);
+  font-family: 'Consolas', 'Courier New', 'Menlo', 'Monaco', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ============== 应用容器 ============== */
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(26, 26, 46, 0.95) 0%, rgba(15, 23, 41, 0.98) 100%),
+    radial-gradient(circle at 50% 0%, rgba(197, 160, 89, 0.08) 0%, transparent 60%);
+}
+
+/* ============== 标题区 ============== */
+.app-header {
+  text-align: center;
+  padding: 28px 20px 20px;
+  border-bottom: 2px solid var(--gold-dim);
+  background:
+    linear-gradient(180deg, rgba(197, 160, 89, 0.08) 0%, transparent 100%);
+  position: relative;
+}
+
+.app-header::before,
+.app-header::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  width: 40px;
+  height: 2px;
+  background: var(--gold);
+}
+.app-header::before { left: 0; }
+.app-header::after { right: 0; }
+
+.app-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(255, 215, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.6);
+  margin: 0;
+}
+
+.app-subtitle {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--gold-dim);
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+/* ============== 主体区域 ============== */
+.app-main {
+  flex: 1;
+  padding: 24px 16px;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ============== 面板 ============== */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  padding: 20px;
+  box-shadow:
+    0 0 0 1px rgba(197, 160, 89, 0.15) inset,
+    0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* ============== 分区 ============== */
+.section {
+  padding: 16px 0;
+  border-bottom: 1px dashed var(--border-dim);
+}
+.section:last-child {
+  border-bottom: none;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 2px;
+  margin-bottom: 14px;
+  padding-left: 10px;
+  border-left: 3px solid var(--gold-dim);
+  text-transform: uppercase;
+}
+
+/* ============== 表单网格 ============== */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field label {
+  font-size: 13px;
+  color: var(--gold-dim);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.field input,
+.field select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.25);
+}
+
+.field input:disabled,
+.field select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.field-hint.error {
+  color: var(--error);
+}
+
+.field-inline {
+  flex-direction: row;
+  align-items: center;
+}
+
+/* ============== 复选框 ============== */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.checkbox-label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--bg-input);
+  border: 1px solid var(--gold-dim);
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+  background: var(--gold);
+  border-color: var(--gold);
+}
+
+.checkbox-label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--bg-dark);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ============== 玩家位置区 ============== */
+.players-block {
+  margin-top: 14px;
+  transition: opacity 0.2s;
+}
+
+.players-block.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.players-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.player-field input {
+  text-align: center;
+  width: 100%;
+}
+
+.player-field label {
+  font-size: 12px;
+}
+
+.players-total {
+  margin-top: 14px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 1px;
+}
+
+.players-total strong {
+  color: var(--gold);
+  font-size: 16px;
+}
+
+.players-total.invalid {
+  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.players-total.invalid strong {
+  color: var(--error);
+}
+
+/* ============== 操作区 ============== */
+.action-section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding-top: 20px;
+}
+
+.btn-generate {
+  background: linear-gradient(180deg, var(--gold) 0%, var(--gold-dim) 100%);
+  color: var(--bg-dark);
+  border: 1px solid var(--gold);
+  border-radius: 2px;
+  padding: 12px 24px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: transform 0.1s, box-shadow 0.15s, filter 0.15s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 215, 0, 0.2) inset;
+}
+
+.btn-generate:hover:not(:disabled) {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 16px rgba(255, 215, 0, 0.3), 0 0 0 1px rgba(255, 215, 0, 0.4) inset;
+}
+
+.btn-generate:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn-generate:disabled {
+  background: linear-gradient(180deg, #5a5a5a 0%, #3a3a3a 100%);
+  color: #888;
+  border-color: #444;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ============== 状态显示 ============== */
+.status {
+  padding: 10px 14px;
+  border-radius: 2px;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-success {
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid var(--success);
+  color: var(--success);
+}
+
+.status-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+.status-loading {
+  background: rgba(255, 215, 0, 0.08);
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+}
+
+/* ============== 加载动画 ============== */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--gold-dim);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ============== 页脚 ============== */
+.app-footer {
+  text-align: center;
+  padding: 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  border-top: 1px solid var(--border-dim);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ============== 响应式设计 ============== */
+@media (max-width: 640px) {
+  .app-title {
+    font-size: 22px;
+    letter-spacing: 2px;
+  }
+
+  .app-subtitle {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+
+  .app-main {
+    padding: 16px 10px;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .players-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .btn-generate {
+    font-size: 14px;
+    letter-spacing: 2px;
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 380px) {
+  .players-grid {
+    grid-template-columns: 1fr;
+  }
+}
