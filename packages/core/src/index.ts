@@ -17,3 +17,4 @@ export * from './tile/abstractMapMember';
 export * from './tile/abstractMapUnit';
 export * from './tile/failureRecord';
 export * from './objects/index';
+export * from './mapSplitter';

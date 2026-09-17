@@ -20,6 +20,7 @@ import {
   getTheaterResources,
 } from './resourceLoader';
 import { generateMap } from './generator';
+import { splitFullMap } from './splitter';
 import { GenerateOptions } from './types';
 
 // ---------------------------------------------------------------------------
@@ -147,6 +148,70 @@ app.post(
       res.setHeader('Content-Length', Buffer.byteLength(result.mapContent, 'utf-8'));
 
       res.send(result.mapContent);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * POST /api/split
+ * 把一张完整地图拆解成若干 `.map` 切片。
+ *
+ * 请求体:
+ *   {
+ *     "theaterType": "TEMPERATE",
+ *     "mapContent": "<完整地图 INI 文本>",
+ *     "skipEmpty": true   // 可选，默认 true，是否跳过内部为空的地块
+ *   }
+ *
+ * 响应: JSON
+ *   {
+ *     "theater": "TEMPERATE",
+ *     "unitSize": "25x25",
+ *     "count": 16,
+ *     "slices": [
+ *       { "name": "split_0_0", "gridX": 0, "gridY": 0, "content": "..." },
+ *       ...
+ *     ]
+ *   }
+ */
+app.post(
+  '/api/split',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { theaterType, mapContent, skipEmpty } = req.body as {
+        theaterType?: string;
+        mapContent?: string;
+        skipEmpty?: boolean;
+      };
+
+      if (!theaterType || typeof theaterType !== 'string') {
+        res.status(400).json({ error: 'theaterType is required and must be a string' });
+        return;
+      }
+      const theater = getTheaterResources(theaterType);
+      if (!theater) {
+        const available = getTheaterInfoList().map((t) => t.name);
+        res.status(404).json({
+          error: `Theater "${theaterType}" not found`,
+          available,
+        });
+        return;
+      }
+      if (!mapContent || typeof mapContent !== 'string' || mapContent.trim().length === 0) {
+        res.status(400).json({ error: 'mapContent is required and must be a non-empty string' });
+        return;
+      }
+
+      const slices = splitFullMap(theaterType, mapContent, { skipEmpty: skipEmpty ?? true });
+
+      res.json({
+        theater: theater.theaterEnum,
+        unitSize: theater.mapUnitSize,
+        count: slices.length,
+        slices,
+      });
     } catch (err) {
       next(err);
     }
@@ -315,6 +380,7 @@ function start(): void {
     console.log('  GET  /api/theaters           - List theaters');
     console.log('  GET  /api/theaters/:name/info - Theater info');
     console.log('  POST /api/generate           - Generate map');
+    console.log('  POST /api/split              - Split map into slices');
   });
 }
 
