@@ -18,3 +18,5 @@ export * from './tile/abstractMapUnit';
 export * from './tile/failureRecord';
 export * from './objects/index';
 export * from './mapSplitter';
+export * from './preview';
+export * from './rmg/index';

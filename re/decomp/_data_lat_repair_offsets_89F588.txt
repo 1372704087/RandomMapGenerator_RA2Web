@@ -1,0 +1,3 @@
+// LAT repair dir offsets (rough) @ 0089F588 (32 bytes)
+FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF
+FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF

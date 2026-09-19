@@ -1,0 +1,25 @@
+OK    005A6C10 Water_2x2Place               decomp (78 lines)
+OK    004865B0 IsShorePieceTile             decomp (8 lines)
+OK    00481810 AdjacentCell                 decomp (18 lines)
+OK    005657A0 DiamondToCell                decomp (14 lines)
+OK    0059BAB0 Blob_EllipseTest             decomp (35 lines)
+OK    0059B940 Blob_DirectedKey             decomp (60 lines)
+OK    005AD870 Shore_HeapReg                decomp (47 lines)
+OK    005ADA40 Shape0_Init                  decomp (29 lines)
+OK    005AD820 Green_Init                   decomp (20 lines)
+OK    0042B1F0 CellCount                    decomp (5 lines)
+OK    004A8BF0 Shore_Begin                  decomp (49 lines)
+OK    00477BE0 VecInit                      decomp (20 lines)
+OK    0057A430 Shore_Pass1                  decomp (206 lines)
+OK    0057A320 Shore_Pass2                  decomp (62 lines)
+OK    0057ACF0 Shore_Pass34                 decomp (255 lines)
+OK    0058BDC0 Scratch_Ctor                 decomp (30 lines)
+OK    0058C2C0 Scratch_At                   decomp (5 lines)
+OK    0068BF50 Waypoint_Set                 decomp (6 lines)
+OK    0068BD00 Waypoint_C                   decomp (22 lines)
+OK    0059D510 Water_CarveRiver             decomp (588 lines)
+OK    0059C920 Water_GrowLake               decomp (546 lines)
+ASMD  0059A8F0 Water_PartitionGridDraws
+ASMD  0068BCC0 Waypoint_A
+ASMD  0068BF50 Waypoint_B
+ASMD  0059BBC0 Water_LandBlobFlood

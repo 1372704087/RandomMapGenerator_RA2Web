@@ -1,0 +1,20 @@
+// off_83FF18: 19 slope rows, each int[4] (NW,NE,SE,SW)
+slope  0 ptr=00B0B6DC: 4294967295 4294967295 4294967295 4294967295
+slope  1 ptr=0083FDD8: 0 15 15 0
+slope  2 ptr=0083FDE8: 0 0 15 15
+slope  3 ptr=0083FDF8: 15 0 0 15
+slope  4 ptr=0083FE08: 15 15 0 0
+slope  5 ptr=0083FE18: 0 0 15 0
+slope  6 ptr=0083FE28: 0 0 0 15
+slope  7 ptr=0083FE38: 15 0 0 0
+slope  8 ptr=0083FE48: 0 15 0 0
+slope  9 ptr=0083FE58: 0 15 15 15
+slope 10 ptr=0083FE68: 15 0 15 15
+slope 11 ptr=0083FE78: 15 15 0 15
+slope 12 ptr=0083FE88: 15 15 15 0
+slope 13 ptr=0083FE98: 0 15 30 15
+slope 14 ptr=0083FEA8: 15 0 15 30
+slope 15 ptr=0083FEB8: 30 15 0 15
+slope 16 ptr=0083FEC8: 15 30 15 0
+slope 17 ptr=0083FED8: 0 15 0 15
+slope 18 ptr=0083FEE8: 15 0 15 0

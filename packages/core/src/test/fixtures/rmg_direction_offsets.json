@@ -1,0 +1,75 @@
+{
+  "source": "unicorn/gamemd.exe",
+  "init_fn": "0x49f2f0",
+  "table": "0x89f688",
+  "table_len": 32,
+  "encoding": "8 x u32; each = (short dx @+0, short dy @+2), +X=east, +Y=south",
+  "order": [
+    "N",
+    "NE",
+    "E",
+    "SE",
+    "S",
+    "SW",
+    "W",
+    "NW"
+  ],
+  "entries": [
+    {
+      "index": 0,
+      "dir": "N",
+      "dword": "0xffff0000",
+      "dx": 0,
+      "dy": -1
+    },
+    {
+      "index": 1,
+      "dir": "NE",
+      "dword": "0xffff0001",
+      "dx": 1,
+      "dy": -1
+    },
+    {
+      "index": 2,
+      "dir": "E",
+      "dword": "0x00000001",
+      "dx": 1,
+      "dy": 0
+    },
+    {
+      "index": 3,
+      "dir": "SE",
+      "dword": "0x00010001",
+      "dx": 1,
+      "dy": 1
+    },
+    {
+      "index": 4,
+      "dir": "S",
+      "dword": "0x00010000",
+      "dx": 0,
+      "dy": 1
+    },
+    {
+      "index": 5,
+      "dir": "SW",
+      "dword": "0x0001ffff",
+      "dx": -1,
+      "dy": 1
+    },
+    {
+      "index": 6,
+      "dir": "W",
+      "dword": "0x0000ffff",
+      "dx": -1,
+      "dy": 0
+    },
+    {
+      "index": 7,
+      "dir": "NW",
+      "dword": "0xffffffff",
+      "dx": -1,
+      "dy": -1
+    }
+  ]
+}

@@ -1,0 +1,117 @@
+OK    00598960 Generate_main                decomp (416 lines)
+OK    00599650 MapPrep                      decomp (591 lines)
+OK    005981F0 ReadRMGMD_INI                decomp (354 lines)
+OK    0059A6C0 Water_Basic                  decomp (127 lines)
+OK    0059AD10 Water_Shape0_Archipelago     decomp (114 lines)
+OK    0059AFA0 Water_Shape1_Mainland        decomp (87 lines)
+OK    0059B200 Water_Shape2_SeaArchipelago  decomp (188 lines)
+OK    0059A8F0 Water_PartitionGridDraws     decomp (215 lines)
+OK    0059BBC0 Water_LandBlobFlood          decomp (467 lines)
+OK    0059C630 Water_Finalize               decomp (66 lines)
+OK    0059C580 Water_Driver_mt34            decomp (43 lines)
+OK    0059D510 Water_CarveRiver             decomp (588 lines)
+OK    0059C920 Water_GrowLake               decomp (546 lines)
+OK    0057A0C0 Water_ShorelineFinalize      decomp (106 lines)
+OK    0058CF90 Region_Partition             decomp (35 lines)
+OK    0058C800 Region_FloodHelper           decomp (292 lines)
+OK    0058E740 Region_Bfs1                  decomp (121 lines)
+OK    0058E9B0 Region_Bfs2                  decomp (103 lines)
+OK    0058D010 Region_Hierarchy             decomp (30 lines)
+OK    0058EBC0 Region_PlateauThreshold      decomp (176 lines)
+OK    0058D620 Region_Split                 decomp (892 lines)
+OK    0058C6F0 Region_SplitCost             decomp (41 lines)
+OK    0058EF10 Bridge_ConnectPass           decomp (126 lines)
+OK    0058F0C0 Bridge_Helper                decomp (128 lines)
+OK    005905D0 Bridge_5x5Connect            decomp (274 lines)
+OK    005A19E0 Cliff_Drops                  decomp (96 lines)
+OK    005A17F0 Water_Reanchor               decomp (66 lines)
+OK    00578E60 Bridge_RampStamp             decomp (79 lines)
+OK    005A0160 Region_DilateRings           decomp (125 lines)
+OK    0059B740 Green_Spread                 decomp (99 lines)
+OK    00578350 CellRecalc_A                 decomp (14 lines)
+OK    00578290 CellRecalc_B                 decomp (48 lines)
+OK    0047D2B0 CellRecalc_C                 decomp (334 lines)
+OK    00594B50 Start_Candidate              decomp (183 lines)
+OK    005A1FB0 Start_WriteFlood             decomp (231 lines)
+OK    00594F40 Start_FarthestSelector       decomp (254 lines)
+OK    005A95B0 Tech_Neutral                 decomp (174 lines)
+OK    00595400 Tech_MapType2                decomp (103 lines)
+OK    005A23A0 Ore_Fields                   decomp (296 lines)
+OK    005A35F0 Hills_Main                   decomp (159 lines)
+OK    006B2A70 Corner_A                     decomp (209 lines)
+OK    006B4100 Corner_B                     decomp (66 lines)
+OK    006B4240 Corner_C                     decomp (126 lines)
+OK    006B3E60 Corner_MorphAt               decomp (157 lines)
+OK    006B3A80 Corner_D                     decomp (118 lines)
+OK    006B3850 Corner_E                     decomp (121 lines)
+OK    006B2520 TerrainTest_Corner           decomp (32 lines)
+OK    005A38C0 LAT_ProbsTemperate           decomp (67 lines)
+OK    005A3AE0 LAT_PatchPlace               decomp (295 lines)
+OK    005A4280 LAT_Apply                    decomp (134 lines)
+OK    005A45E0 Trees_Plant                  decomp (253 lines)
+OK    00722D00 GrowthQueue_Init             decomp (86 lines)
+OK    00722240 GrowthQueue_Spread           decomp (86 lines)
+OK    00654490 Radar_Bounds                 decomp (89 lines)
+OK    00654650 Radar_Surfaces               decomp (80 lines)
+OK    0068BCC0 Waypoint_A                   decomp (6 lines)
+OK    0068BF50 Waypoint_B                   decomp (6 lines)
+OK    00486380 TerrainTest_A                decomp (8 lines)
+OK    004865D0 TerrainTest_WaterFamily      decomp (14 lines)
+OK    004867B0 TerrainTest_C                decomp (8 lines)
+OK    0049F2F0 DirectionOffsets_Filler      decomp (13 lines)
+OK    00598030 NextUniformRange             decomp (23 lines)
+OK    0065C7E0 RandomRanged                 decomp (65 lines)
+OK    005980C0 NextGaussian                 decomp (37 lines)
+OK    00597260 RandomizeDerivedFields       decomp (41 lines)
+OK    005975E0 ClampFields                  decomp (171 lines)
+OK    00595680 MapSeed_Ctor                 decomp (33 lines)
+OK    00597A30 SED_Load                     decomp (109 lines)
+XREF  004866F3 -> 00ABBEC4 in 4866F0, dumping
+OK    004866F0 watch_4866F0                 decomp (8 lines)
+XREF  00545AFB -> 00ABBEC4 in 545150, dumping
+OK    00545150 watch_545150                 decomp (904 lines)
+XREF  00545EE9 -> 00ABBEC4 in already-dumped 545150
+XREF  0058FC6C -> 00ABBEC4 in 58F2C0, dumping
+OK    0058F2C0 watch_58F2C0                 decomp (681 lines)
+XREF  0058FD33 -> 00ABBEC4 in already-dumped 58F2C0
+XREF  00590090 -> 00ABBEC4 in already-dumped 58F2C0
+XREF  00590173 -> 00ABBEC4 in already-dumped 58F2C0
+XREF  005A5CC8 -> 00ABBEC4 in 5A5B50, dumping
+OK    005A5B50 watch_5A5B50                 decomp (357 lines)
+XREF  005A5DB8 -> 00ABBEC4 in already-dumped 5A5B50
+XREF  005A6066 -> 00ABBEC4 in already-dumped 5A5B50
+XREF  005A6349 -> 00ABBEC4 in already-dumped 5A5B50
+XREF  005A64AD -> 00ABBEC4 in already-dumped 5A5B50
+XREF  0047CB37 -> 00ABBEC8 in 47CA80, dumping
+OK    0047CA80 watch_47CA80                 decomp (357 lines)
+XREF  004866D3 -> 00ABBEC8 in 4866D0, dumping
+OK    004866D0 watch_4866D0                 decomp (8 lines)
+XREF  00545AF5 -> 00ABBEC8 in already-dumped 545150
+XREF  00545EDA -> 00ABBEC8 in already-dumped 545150
+XREF  0058FC1F -> 00ABBEC8 in already-dumped 58F2C0
+XREF  0058FD02 -> 00ABBEC8 in already-dumped 58F2C0
+XREF  0059004A -> 00ABBEC8 in already-dumped 58F2C0
+XREF  00590141 -> 00ABBEC8 in already-dumped 58F2C0
+XREF  005A5CA9 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A5D1E -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A5DA6 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A5FAD -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A6022 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A603B -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A60B6 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A6235 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A63A7 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A63D7 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A6495 -> 00ABBEC8 in already-dumped 5A5B50
+XREF  005A782C -> 00ABBEC8 in 5A76E0, dumping
+OK    005A76E0 watch_5A76E0                 decomp (93 lines)
+XREF  00594DF0 -> 00ABE028 in 594B50, dumping
+OK    00594B50 watch_594B50                 decomp (183 lines)
+XREF  00594F7D -> 00ABE028 in 594F40, dumping
+OK    00594F40 watch_594F40                 decomp (254 lines)
+XREF  00596018 -> 00ABE028 in 595FB0, dumping
+OK    00595FB0 watch_595FB0                 decomp (128 lines)
+XREF  007A2494 -> 00ABE028 in 7A2330, dumping
+OK    007A2330 watch_7A2330                 decomp (102 lines)
+XREF  0058ED89 -> 00ABE048 in 58EBC0, dumping
+OK    0058EBC0 watch_58EBC0                 decomp (176 lines)

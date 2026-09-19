@@ -1,0 +1,9 @@
+OK    0057B210 Shore_MaskProbe          decomp (118 lines)
+OK    00485060 IsWaterTileQ             decomp (8 lines)
+OK    005A00C0 Shore_QueryTag           decomp (8 lines)
+OK    005A0090 Shore_SetTag             decomp (12 lines)
+OK    0057B440 Shore_StampTile          decomp (161 lines)
+OK    004A91B0 Coord_Helper             decomp (130 lines)
+OK    004A8BF0 Shore_Begin              decomp (49 lines)
+ASMD  0059C630 Water_Finalize
+DATA  word_ABDB64 48 pairs dumped

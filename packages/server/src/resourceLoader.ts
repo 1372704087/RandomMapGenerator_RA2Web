@@ -75,6 +75,8 @@ export interface TheaterResources {
   mapUnitCount: number;
   /** 是否有 cannotplacesmudge.map */
   hasCannotPlaceSmudge: boolean;
+  /** empty.map 内容（可选）：单元空白基准，含手工单元的窗外框，切片画框用 */
+  emptyMapContent?: string;
 }
 
 /** 全局共享资源 */
@@ -289,6 +291,14 @@ function loadTheaterResources(
     cannotPlaceSmudgeMapContent = readTextFile(smudgePath);
   }
 
+  // 读取 empty.map（可选）：单元的「空白基准」模板。
+  // 手工单元的窗外框（公路圈边/整圈填充）就来自它，切片用它画框（见 splitter.ts）。
+  let emptyMapContent: string | undefined;
+  const emptyPath = path.join(theaterDir, 'empty.map');
+  if (fs.existsSync(emptyPath)) {
+    emptyMapContent = readTextFile(emptyPath);
+  }
+
   // 读取 addition.ini（可选）
   let additionIniContent: string | null = null;
   const additionPath = path.join(theaterDir, 'addition.ini');
@@ -348,6 +358,7 @@ function loadTheaterResources(
     playerAdditions,
     mapUnitCount: mapUnitFiles.length,
     hasCannotPlaceSmudge,
+    emptyMapContent,
   };
 }
 

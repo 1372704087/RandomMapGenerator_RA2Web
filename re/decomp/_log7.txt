@@ -1,0 +1,15 @@
+OK    0056D230 Zone_GetZoneID             decomp (71 lines)
+OK    005A7250 Placeability_Gate          decomp (93 lines)
+OK    00578640 Start_Rect6x6Check         decomp (33 lines)
+OK    00544C20 Tile_FrameValidQ           decomp (10 lines)
+OK    005471B0 Tile_SlopeOfSubtile        decomp (12 lines)
+OK    00544BE0 Tile_LandOfSubtile         decomp (12 lines)
+OK    00547370 Tile_MultiTileFlags        decomp (269 lines)
+OK    00483C80 CellAttr_483C80            decomp (103 lines)
+OK    005FDD20 Unknown_5FDD20             decomp (49 lines)
+OK    0056D6E0 MapPrep_AttrInit           decomp (174 lines)
+OK    00581F50 MapPrep_581F50             decomp (17 lines)
+OK    00568BB0 InitCellAttributes         decomp (107 lines)
+OK    005AC290 Region_Dtor                decomp (38 lines)
+DATA  _data_passability_matrix_82A594.txt @ 0082A594
+DATA  _data_lat_repair_offsets_89F588.txt @ 0089F588

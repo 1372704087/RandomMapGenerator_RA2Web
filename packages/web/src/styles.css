@@ -420,3 +420,495 @@ html, body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   多页签导航
+   ============================================================ */
+
+.tabs {
+  display: flex;
+  gap: 0;
+  justify-content: center;
+  flex-wrap: wrap;
+  padding: 0 16px;
+  background: rgba(0, 0, 0, 0.25);
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.tab:hover {
+  color: var(--gold-dim);
+  background: rgba(197, 160, 89, 0.06);
+}
+
+.tab.active {
+  color: var(--gold);
+  border-bottom-color: var(--gold);
+  background: rgba(197, 160, 89, 0.1);
+}
+
+.tab-label {
+  font-weight: 700;
+}
+
+.tab-sub {
+  font-size: 10px;
+  letter-spacing: 3px;
+  opacity: 0.65;
+}
+
+@media (min-width: 900px) {
+  .app-main {
+    max-width: 1100px;
+  }
+}
+
+/* ============================================================
+   通用补充控件
+   ============================================================ */
+
+.field textarea {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field textarea:focus {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(255, 215, 0, 0.25);
+}
+
+.field input[type="file"] {
+  padding: 6px;
+  font-size: 12px;
+}
+
+.button-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn-secondary {
+  background: var(--bg-panel-light);
+  color: var(--gold-dim);
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  padding: 10px 18px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  color: var(--gold);
+  border-color: var(--gold-dim);
+  background: rgba(197, 160, 89, 0.12);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sub-title {
+  font-size: 13px;
+  color: var(--gold-dim);
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin: 16px 0 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sub-title-meta {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+}
+
+.mono {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+}
+
+/* ============================================================
+   键值网格
+   ============================================================ */
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.kv {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+}
+
+.kv-k {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+}
+
+.kv-v {
+  font-size: 15px;
+  color: var(--gold);
+  font-weight: 700;
+  word-break: break-all;
+}
+
+/* ============================================================
+   代码块 / 文本域
+   ============================================================ */
+
+.code-input,
+.code-block {
+  width: 100%;
+  background: #0a0f1c;
+  color: #cfe3ff;
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  padding: 10px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+}
+
+.code-input {
+  resize: vertical;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.code-block {
+  max-height: 360px;
+  margin-top: 10px;
+}
+
+/* ============================================================
+   切片布局图
+   ============================================================ */
+
+.slice-map {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.slice-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 6px 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.slice-cell:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold-dim);
+}
+
+.slice-cell.active {
+  border-color: var(--gold);
+  background: rgba(197, 160, 89, 0.15);
+  color: var(--gold);
+}
+
+.slice-cell.empty {
+  cursor: default;
+  opacity: 0.3;
+  border-style: dashed;
+}
+
+.slice-cell.empty:hover {
+  border-color: var(--border-dim);
+  color: var(--text-dim);
+}
+
+.slice-cell-name {
+  font-weight: 700;
+  word-break: break-all;
+  text-align: center;
+}
+
+.slice-cell-size {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ============================================================
+   提示块 / 列表
+   ============================================================ */
+
+.notice {
+  padding: 12px 14px;
+  border-radius: 2px;
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid;
+}
+
+.notice-warn {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: var(--warning);
+  color: #f5d68a;
+}
+
+.notice-ok {
+  background: rgba(74, 222, 128, 0.08);
+  border-color: var(--success);
+  color: #a7f3c4;
+}
+
+.notes {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+.notes li {
+  margin-bottom: 3px;
+}
+
+/* ============================================================
+   阶段状态表
+   ============================================================ */
+
+.stage-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+}
+
+.stage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.stage-table th,
+.stage-table td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(90, 74, 42, 0.5);
+  vertical-align: top;
+}
+
+.stage-table th {
+  background: var(--bg-panel-light);
+  color: var(--gold-dim);
+  font-weight: 700;
+  letter-spacing: 1px;
+  position: sticky;
+  top: 0;
+}
+
+.stage-table tbody tr:hover {
+  background: rgba(197, 160, 89, 0.06);
+}
+
+.stage-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.stage-table .stage-pending td {
+  color: var(--text-dim);
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  .tab {
+    padding: 10px 12px;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+
+  .kv-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Theater 自动识别框
+   ============================================================ */
+
+.detect-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-dim);
+  border-left-width: 3px;
+  border-radius: 2px;
+  background: var(--bg-input);
+  font-size: 13px;
+}
+
+.detect-ok {
+  border-left-color: var(--success);
+}
+
+.detect-warn {
+  border-left-color: var(--warning);
+}
+
+.detect-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--text);
+}
+
+.detect-k {
+  min-width: 96px;
+  color: var(--text-dim);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.detect-v {
+  color: var(--gold);
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.detect-tag {
+  padding: 1px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--gold-dim);
+  letter-spacing: 0.5px;
+}
+
+.detect-note {
+  color: var(--warning);
+  font-size: 12px;
+  line-height: 1.6;
+  display: block;
+}
+
+/* ============================================================
+   地图雷达预览
+   ============================================================ */
+
+.preview-block {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preview-img {
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  background: #000;
+}
+
+.slice-thumb {
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  image-rendering: pixelated;
+}
+
+.slice-cell .slice-thumb {
+  max-width: 100%;
+}
+
+/* ============================================================
+   预览大图查看器（灯箱）
+   ============================================================ */
+
+.preview-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(5, 8, 16, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+
+.preview-lightbox-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+}
+
+.preview-lightbox-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.preview-lightbox-title {
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 1px;
+  word-break: break-all;
+}
+
+.preview-lightbox-inner canvas {
+  border: 1px solid var(--gold-dim);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+}
+

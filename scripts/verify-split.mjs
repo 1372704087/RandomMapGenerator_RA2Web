@@ -21,7 +21,7 @@ import {
   getTheaterResources,
   getTheaterInfoList,
 } from '../packages/server/dist/resourceLoader.js';
-import { splitFullMap } from '../packages/server/dist/splitter.js';
+import { splitFullMap, buildSplitConfig } from '../packages/server/dist/splitter.js';
 import { generateMap } from '../packages/server/dist/generator.js';
 
 let pass = 0;
@@ -509,6 +509,209 @@ check('未知 theater 抛错', () => {
 });
 check('无图块源地图抛错', () => {
   assert.throws(() => splitFullMap('TEMPERATE', '[Map]\nSize=0,0,10,10'), /IsoTileList/);
+});
+
+// ---------------------------------------------------------------------------
+section('切片空白格语义（块外格惰性证明 + 覆盖率统计）');
+//
+// 背景：`CreateEmptyMap` 把每格 TileNum 初始化为 Common._000_Empty = -1，
+//       而切片画布 (s×s，TEMPERATE 为 19×19=703 格) 远大于它承载的地形块
+//       (MapUnitSize×MapUnitSize，15×15=225 格) ⇒ 未写入的格留在 -1 上，
+//       在地图编辑器里表现为大片空白。
+//
+// 本节用机器实验证明两件事（不靠读代码推断）：
+//   1. 「内容块之外」的 -1 格不参与 AbstractMapUnit 的读取（改成 0 模型不变）⇒ 惰性；
+//   2. 「内容块之内」的 -1 格参与读取（改成 0 模型会变）⇒ 上面那条断言真的有牙齿。
+// 由此得出结论：若要消除编辑器里的空白，只能填「块外」格，块内一格都不能动。
+
+const blankRes = getTheaterResources('TEMPERATE');
+assert.ok(blankRes);
+WorkingMap.Initialize(30, 30, blankRes.config);
+WorkingMap.SterilizeMapUnit(blankRes.config);
+
+const BLANK_MUW = WorkingMap.MapUnitWidth;
+const BLANK_MUH = WorkingMap.MapUnitHeight;
+const BLANK_SX = WorkingMap.StartingX;
+const BLANK_SY = WorkingMap.StartingY;
+
+const blankSlices = splitFullMap('TEMPERATE', genResult.mapContent, { skipEmpty: true });
+
+/** 读取一个切片在单元局部网格 [0,MUW)×[0,MUH) 上的模型快照（含 null 计数） */
+function unitModel(content) {
+  const unit = new AbstractMapUnit();
+  unit.Initialize({ name: 'probe.map', fullName: 'probe.map' }, content);
+  const cells = [];
+  let nullCount = 0;
+  for (let i = 0; i < BLANK_MUW; i++) {
+    for (let j = 0; j < BLANK_MUH; j++) {
+      const c = unit.AbsTileType[i][j];
+      if (c === null) {
+        nullCount++;
+        cells.push('null');
+      } else {
+        cells.push(`${c.TileNum}/${c.SubTile}/${c.Z}`);
+      }
+    }
+  }
+  return { key: cells.join('|'), nullCount };
+}
+
+/** 把 -1 格改写成 0 后重新序列化。scope='outside' 只填内容块之外，'all' 全填 */
+function refillBlanks(content, scope) {
+  const src = new MapFile();
+  src.CreateIsoTileList(content);
+  for (const t of src.IsoTileList) {
+    if (t.TileNum !== -1) continue;
+    const inBlock =
+      t.Rx >= BLANK_SX &&
+      t.Rx < BLANK_SX + BLANK_MUW &&
+      t.Ry >= BLANK_SY &&
+      t.Ry < BLANK_SY + BLANK_MUH;
+    if (scope === 'outside' && inBlock) continue;
+    t.TileNum = 0;
+  }
+  const out = new MapFile();
+  out.Width = src.Width;
+  out.Height = src.Height;
+  out.MapTheater = src.MapTheater;
+  out.IsoTileList = src.IsoTileList;
+  return out.SaveFullMap(content, { bottomSpace: 0 });
+}
+
+// 覆盖率统计（信息性输出，量化「编辑器里大片空白」这件事）
+{
+  let minPct = 100;
+  let maxPct = 0;
+  let sum = 0;
+  for (const s of blankSlices) {
+    const mf = new MapFile();
+    mf.CreateIsoTileList(s.content);
+    const filled = mf.IsoTileList.filter((t) => t.TileNum !== -1).length;
+    const pct = Math.round((filled / mf.IsoTileList.length) * 100);
+    minPct = Math.min(minPct, pct);
+    maxPct = Math.max(maxPct, pct);
+    sum += pct;
+  }
+  console.log(
+    `  覆盖率 min=${minPct}% max=${maxPct}% avg=${Math.round(sum / blankSlices.length)}%` +
+      `（${blankSlices.length} 张；理论上限 = ${BLANK_MUW}×${BLANK_MUH} / 画布格数）`,
+  );
+}
+
+const blankProbe =
+  blankSlices.find((s) => s.name === 'split_0_5') ?? blankSlices[0];
+// 注意：genResult 由 Math.random 生成，每次运行内容不同 ⇒ 这里统计的是「本运行」的分布
+let probeOutsideMinus1 = 0;
+let probeInsideMinus1 = 0;
+{
+  const mf = new MapFile();
+  mf.CreateIsoTileList(blankProbe.content);
+  for (const t of mf.IsoTileList) {
+    if (t.TileNum !== -1) continue;
+    const inBlock =
+      t.Rx >= BLANK_SX &&
+      t.Rx < BLANK_SX + BLANK_MUW &&
+      t.Ry >= BLANK_SY &&
+      t.Ry < BLANK_SY + BLANK_MUH;
+    if (inBlock) probeInsideMinus1++;
+    else probeOutsideMinus1++;
+  }
+  console.log(
+    `  探针切片 ${blankProbe.name}: 块外 -1=${probeOutsideMinus1}  块内 -1=${probeInsideMinus1}`,
+  );
+  check('探针切片确实存在块外 -1 空格（断言对象非空转）', () => {
+    assert.ok(probeOutsideMinus1 > 0, `outside=-1 count is ${probeOutsideMinus1}`);
+  });
+}
+
+const modelA = unitModel(blankProbe.content);
+const modelB = unitModel(refillBlanks(blankProbe.content, 'outside'));
+const modelC = unitModel(refillBlanks(blankProbe.content, 'all'));
+
+check('块外 -1 填 0 → AbstractMapUnit 模型逐格一致（惰性证明）', () => {
+  assert.equal(modelB.key, modelA.key);
+});
+check('块内 -1 填 0 → 模型会改变（证明上面的惰性断言有牙齿）', () => {
+  assert.notEqual(modelC.key, modelA.key);
+});
+// 实测记录（2026-09-18）：块内 -1 在 AbstractMapUnit 里是「有记录的 TileNum=-1」，
+// 不是缺格（null）。也就是说「块内 -1 → 0」必然改变单元模型 ⇒ 块内一格都不能动。
+// 若未来想让切片在编辑器里变实心，只允许填「块外」（上面已证明其惰性）。
+console.log(
+  `  块内 -1 记录数=${probeInsideMinus1}（Initialize 后 null 格数=${modelA.nullCount}）` +
+    ` —— 块内为显式 -1 记录，非缺格`,
+);
+
+// ---------------------------------------------------------------------------
+section('窗外框（frame 选项）');
+//
+// frame=true 时，切片用 empty.map 的框图块填充「功能窗口之外」的格。
+// 守卫三条硬边界：
+//   1. 框绝不进功能窗口（窗口内的模型必须与不开框时逐格一致）；
+//   2. 框不覆盖指示图块（indicator 连接 ID 仍可读回）；
+//   3. 开框后窗外 -1 明显减少（框真的画上了）。
+
+// 用真正的 MapSplitConfig（此前误用 WorkingMapConfig，导致 W/H 为 undefined、切片数为 0）
+const FRAMED_CONFIG = buildSplitConfig(getTheaterResources('TEMPERATE'));
+assert.ok(FRAMED_CONFIG.emptyMapContent, 'TEMPERATE 缺少 empty.map，无法测试 frame');
+
+const framedSlices = splitMap(genResult.mapContent, FRAMED_CONFIG, {
+  skipEmpty: true,
+  frame: true,
+});
+const unframedByName = new Map(blankSlices.map((s) => [s.name, s]));
+const framedByName = new Map(framedSlices.map((s) => [s.name, s]));
+
+check('frame=true 不改变切片集合（数量与名称一致）', () => {
+  assert.equal(framedSlices.length, blankSlices.length);
+  for (const s of framedSlices) assert.ok(unframedByName.has(s.name));
+});
+
+check('开框后窗口内模型逐格一致（框绝不进窗口）', () => {
+  for (const s of framedSlices) {
+    const un = unframedByName.get(s.name);
+    assert.equal(unitModel(s.content).key, unitModel(un.content).key, `${s.name} 窗口内被框改动`);
+  }
+});
+
+check('开框后窗外 -1 显著减少（框真的画上了）', () => {
+  function outsideMinus1Count(content) {
+    const mf = new MapFile();
+    mf.CreateIsoTileList(content);
+    let n = 0;
+    for (const t of mf.IsoTileList) {
+      if (t.TileNum !== -1) continue;
+      const inW =
+        t.Rx >= BLANK_SX && t.Rx < BLANK_SX + BLANK_MUW &&
+        t.Ry >= BLANK_SY && t.Ry < BLANK_SY + BLANK_MUH;
+      if (!inW) n++;
+    }
+    return n;
+  }
+  let unframedTotal = 0;
+  let framedTotal = 0;
+  for (const s of framedSlices) {
+    unframedTotal += outsideMinus1Count(unframedByName.get(s.name).content);
+    framedTotal += outsideMinus1Count(s.content);
+  }
+  console.log(`  窗外 -1：不开框=${unframedTotal}  开框=${framedTotal}`);
+  assert.ok(framedTotal < unframedTotal, `framed=${framedTotal} should be < unframed=${unframedTotal}`);
+});
+
+check('框不覆盖指示图块（连接 ID 仍可读回）', () => {
+  // 指示图块 = indicatorNum；逐切片统计 indicator 格数，开框前后必须一致
+  function indicatorCount(content) {
+    const mf = new MapFile();
+    mf.CreateIsoTileList(content);
+    return mf.IsoTileList.filter((t) => t.TileNum === FRAMED_CONFIG.indicatorNum).length;
+  }
+  for (const s of framedSlices) {
+    assert.equal(
+      indicatorCount(s.content),
+      indicatorCount(unframedByName.get(s.name).content),
+      `${s.name} 指示图块数量被框改变`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,16 @@ export interface MapSplitConfig {
   theater: Theater;
   /** 指示图块编号，来自 indicator.map 的 IsoTileList[0].TileNum */
   indicatorNum: number;
+  /**
+   * empty.map 内容（可选）：单元的「空白基准」模板。
+   *
+   * 手工地图单元在功能窗口（[startingX, startingX+mapUnitWidth) × …）**之外**画了一圈
+   * 框（TEMPERATE 是 Tile293/294 公路圈 + Tile0 清地，DESERT 是 Tile386 整圈填充…）。
+   * 实测（2026-09-18，verify-split「切片空白格语义」节）：窗口外的格不参与
+   * AbstractMapUnit.Initialize 的读取，也不被 PlaceMapUnitToWorkingMap 消费 ⇒ 纯视觉，
+   * 在编辑器里让单元有边界感。`splitMap` 的 `frame: true` 会按本模板给切片画框。
+   */
+  emptyMapContent?: string;
 }
 
 /** 单张切片结果 */
@@ -100,6 +110,14 @@ export interface MapSplitOptions {
    * 默认 true。
    */
   skipEmpty?: boolean;
+  /**
+   * 是否给切片画「窗外框」（沿用 config.emptyMapContent 里手工单元的框图块）。
+   *
+   * 框只落在功能窗口之外 ⇒ 对生成器纯视觉（已由 verify-split「切片空白格语义」节
+   * 用机器实验证明：块外 -1 填 0 后 AbstractMapUnit 模型逐格一致）。
+   * 默认 false（保持既有格式不变；命令行/网页层可显式开启）。
+   */
+  frame?: boolean;
 }
 
 /**
@@ -223,6 +241,11 @@ export function splitMap(
   };
 
   // 3. 逐块生成切片
+  const frame = options?.frame === true && !!config.emptyMapContent;
+  const frameTemplate = frame
+    ? buildFrameTemplate(config.emptyMapContent!, SX, SY, W, H)
+    : null;
+
   const slices: MapSplitSlice[] = [];
   for (let i = 0; i < gx; i++) {
     for (let j = 0; j < gy; j++) {
@@ -242,6 +265,7 @@ export function splitMap(
         seamV,
         seamH,
         sourceIni,
+        frameTemplate,
       );
       slices.push({
         name: `split_${i}_${j}`,
@@ -279,6 +303,7 @@ function buildSlice(
   seamV: number[][],
   seamH: number[][],
   sourceIni: string,
+  frameTemplate: Map<string, number> | null,
 ): string {
   const blockRX0 = OX + i * W;
   const blockRY0 = OY + j * H;
@@ -404,9 +429,55 @@ function buildSlice(
   // 7. 平移对象（单位/步兵/建筑/地形/飞机/污迹/路径点）
   attachObjects(sliceMap, sourceIni, blockRX0, blockRY0, SX, SY, W, H);
 
+  // 7b. 画窗外框（frame=true 时）：只填「仍是 -1」的窗口外格。
+  //     指示图块已在上面写入（非 -1），天然不会被框覆盖；
+  //     内容块（窗口内）一格都不碰 —— 块内的值参与单元模型，动了会变（见 verify-split）。
+  if (frameTemplate) {
+    for (const tile of sliceMap.IsoTileList) {
+      if (tile.TileNum !== -1) continue;
+      const dx = tile.Rx - SX;
+      const dy = tile.Ry - SY;
+      const inWindow = dx >= 0 && dx < W && dy >= 0 && dy < H;
+      if (inWindow) continue;
+      const frameTile = frameTemplate.get(`${dx},${dy}`);
+      if (frameTile === undefined) continue;
+      tile.TileNum = frameTile;
+      tile.SubTile = 0;
+      tile.Z = 0;
+    }
+  }
+
   // 8. 组装并返回 INI 文本
   const content = sliceMap.SaveFullMap(undefined, { bottomSpace: 0 });
   return content;
+}
+
+/**
+ * 从 empty.map 提取「窗外框模板」：键 = (Rx-startingX, Ry-startingY)（相对窗口的
+ * 有符号偏移），值 = TileNum。只收窗口外的格。
+ *
+ * 手工单元的框因 theater 而异（TEMPERATE 是 Tile293/294 公路圈 + Tile0 清地，
+ * DESERT 是 Tile386 整圈填充，Islands 是 Tile418 水面），所以模板必须逐 theater
+ * 从它自己的 empty.map 采集，不能硬编码图块号。
+ */
+function buildFrameTemplate(
+  emptyMapContent: string,
+  SX: number,
+  SY: number,
+  W: number,
+  H: number,
+): Map<string, number> {
+  const empty = new MapFile();
+  empty.CreateIsoTileList(emptyMapContent);
+  const tpl = new Map<string, number>();
+  for (const t of empty.IsoTileList) {
+    if (t.TileNum === -1) continue;
+    const dx = t.Rx - SX;
+    const dy = t.Ry - SY;
+    if (dx >= 0 && dx < W && dy >= 0 && dy < H) continue; // 窗口内的不是框
+    tpl.set(`${dx},${dy}`, t.TileNum);
+  }
+  return tpl;
 }
 
 // ---------------------------------------------------------------------------
