@@ -6,3 +6,8 @@ temp/
 *.local
 .env
 .env.local
+
+# 调试产物 / oracle 对拍工件（大体量，勿入库）
+.tmp_oracle/
+.tmp_cxx/
+re/out/

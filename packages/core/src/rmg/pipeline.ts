@@ -15,6 +15,12 @@ import { NativeCells, ScratchGrid } from './native';
 import { TheaterTables } from './theater';
 import { DerivedDimensions } from './options';
 import { shoreFinalize, waterBasic, waterFinalize, WaterContext } from './water';
+import { waterBasicMt34 } from './waterMt34';
+import { regionPlateauThreshold } from './regionPlateau';
+import { bridgeConnectPass } from './bridge';
+import { cliffDrops } from './cliff';
+import { placeCliffs } from './cliffPlacer';
+import { bridgeRampStamp, waterReanchor } from './bridgeRamp';
 import {
   createRegionState,
   regionBfs1,
@@ -48,6 +54,16 @@ export interface GenerateInput {
   theater: number;
   dimensions: DerivedDimensions;
   tables: TheaterTables;
+  /**
+   * 模板元数据表（可选）。
+   *
+   * 不传 ⇒ 用 `FlatTemplateProvider`（占位：全 1×1 子格、slope 0、height 30）。
+   * 传入 ⇒ 用 `KnownTemplateProvider`（真机反推数据，`rmg/templateKnown.ts`）。
+   *
+   * ⚠ 缺省保持占位是有意的 —— 反推数据仍是**下界**，
+   *   接入前需用 `re/duo_known.js` 对拍确认收益。
+   */
+  templateTable?: unknown;
 }
 
 /** 管线运行后的完整状态（供后续阶段 / emit / 测试检查） */
@@ -120,15 +136,26 @@ export function mapPrep(input: GenerateInput, rng: RmgRng): PipelineState {
     resources: input.resources,
     tiberiumPercent: input.tiberium,
     startQuota: 4,
+    waterUsedArea: 0,
     starts: { waypoints: [] },
     isoTileTypeCount: input.tables.totalTiles,
     terrainObjects: [],
     structures: [],
     recalc: {
       rules: { cliffBackImpassability: 0 },
-      templates: new (
-        require('./recalc') as typeof import('./recalc')
-      ).FlatTemplateProvider(input.tables),
+      // ⚠ 默认仍用 `FlatTemplateProvider`（占位：全 1×1、slope 0、height 30）。
+      // 传入 `templateTable` 时改用 `KnownTemplateProvider`（真机反推数据）。
+      // 见 `rmg/templateKnown.ts` 顶部「数据来源」与限制说明。
+      templates:
+        input.templateTable !== undefined
+          ? new (
+              require('./templateKnown') as typeof import('./templateKnown')
+            ).KnownTemplateProvider(
+              input.templateTable as import('./templateKnown').KnownTemplateTable,
+            )
+          : new (
+              require('./recalc') as typeof import('./recalc')
+            ).FlatTemplateProvider(input.tables),
     },
   };
 
@@ -155,6 +182,80 @@ export function runRegionStage(state: PipelineState): void {
     regionBfs2(ctx, region);
   }
   regionFallback(ctx, regions, 0);
+}
+
+/**
+ * 阶段 7（**仅 MapType 3/4**）：台地阈值 + 区域分裂。
+ *
+ * 原生 `0x0058EBC0`：倒序遍历全图累加各区域格数、更新 bbox，
+ * 再按阈值 `trunc(2·(scale·0.005+0.05)·W·H)` 决定
+ * 「小区域标记保留」还是「大区域尝试分裂」（`0x58D620`，**未移植**）。
+ *
+ * 序位置：阶段 6（区域 BFS/层级）之后、阶段 11（绿地）之前 ——
+ * 原生 3/4 型走 0x58EBC0 → 0x58D620 → 0x58EF10 → … → 0x59B740。
+ */
+export function runPlateauStage(state: PipelineState): void {
+  const { ctx, regions } = state;
+  if (ctx.mapType !== 3 && ctx.mapType !== 4) return; // 仅 3/4 型
+  regionPlateauThreshold(ctx, regions);
+}
+
+/**
+ * 阶段 8（**仅 MapType 3/4**）：桥 / 连接。
+ *
+ * 原生 `0x0058EF10`：三段式
+ *   ① `0x58F0C0` 逐区域收集**邻接区域 id 列表**（→ `RmgRegion.neighbors`）
+ *   ② `0x5905D0` 逐区域做 5×5 配对（→ `RmgRegion.bridges`，**只记账**）
+ *   ③ 清各区域次级结构（本仓无对应堆结构）
+ *
+ * ⚠ **只记账不落地**：连桥动作 `sub_58F2C0`（写 ramp/brick tile）**未移植**，
+ * 所以桥目前不会真的出现在地图上。本阶段的价值是产出邻接关系，
+ * 供后续 `0x58F2C0` 与阶段 9（悬崖落差）使用。
+ */
+export function runBridgeStage(state: PipelineState): void {
+  const { ctx, regions } = state;
+  if (ctx.mapType !== 3 && ctx.mapType !== 4) return; // 仅 3/4 型
+  bridgeConnectPass(ctx, regions);
+}
+
+/**
+ * 阶段 9（**仅 MapType 3/4**）：悬崖落差。
+ *
+ * 原生 `0x005A19E0`（97 行）：蛇形扫全图，按 tile 分三族
+ * （干崖 / 水崖 / 抬升崖）调整邻格 level **±4**，并把源格 regionId 抄给目标格。
+ * ①② 两族各有 50% 概率跳过，③ 不掷 RNG。
+ */
+export function runCliffStage(state: PipelineState): number {
+  const { ctx } = state;
+  if (ctx.mapType !== 3 && ctx.mapType !== 4) return 0; // 仅 3/4 型
+  // ✅ 原生序（`sub_578E60` = PlaceCliffs）：
+  //   Pass1 `CliffPass`(0x579010) 填洼 → Pass2 `PlaceCliffPiece`(0x579620) 落片
+  //   → `CorrectCliffTiles`(0x5A17F0) 转向修正 → `FixCliffLevels`(0x5A19E0) 崖边 ±4。
+  // ⚠ 此前本阶段只跑 `cliffDrops`（= FixCliffLevels），而它三个分支全部以
+  //   「本格已是崖族 tile」为前提 —— 我们从没写过 cliff tile ⇒ **一直是空转**，
+  //   对拍里 `cliff 恒 0` 的根因。
+  placeCliffs(ctx);
+  return cliffDrops(ctx);
+}
+
+/**
+ * 阶段 10（**仅 MapType 3/4**）：桥坡 + 水砖再锚定。
+ *
+ * 原生序（`0x598D62` 调用块）：
+ *   `0x578E60` 桥坡 → `0x5A17F0` 水砖再锚定 → 之后才是阶段 11 绿地。
+ *
+ * ⚠ `0x578E60` 是**包装器**：`579010`（筛选）/ `579620`（盖坡）/ `58BDC0`（cell 构造）
+ * 三个关键函数未反编译，本移植按可确定的框架语义近似。
+ * `0x5A17F0` 语义明确，已完整移植。
+ */
+export function runBridgeRampStage(state: PipelineState): void {
+  const { ctx } = state;
+  if (ctx.mapType !== 3 && ctx.mapType !== 4) return; // 仅 3/4 型
+  // ✅ `bridgeRampStamp` 的第一轮判定已按 capstone 实测（size=0x2B3）修正
+  //    —— 原生返回「工作是否推进」而非「地形是否可生长」。
+  //    第二轮盖坡（`0x579620`，size=0x539）仍为近似，但不再是死路径。
+  bridgeRampStamp(ctx, -1);
+  waterReanchor(ctx);
 }
 
 /**
@@ -214,14 +315,18 @@ export function runRecalcStage(state: PipelineState): void {
 }
 
 /**
- * 阶段 3+4（MapType 0/1/2）。MapType 3/4 走 0x0059C580 驱动（未接，抛错）。
+ * 阶段 3+4。按 MapType 分派水体驱动（原生入口 `0x0059A6C0` / `0x0059C580`）：
+ *   - MapType 0/1/2 → `waterBasic`（全图铺 waterSet，再按形状打洞）
+ *   - MapType 3/4   → `waterBasicMt34`（**不铺满**，在清地上生长河/湖）
+ *
+ * ⚠ 3/4 型与 0/1/2 型是**两条独立路径**，不是参数差异：
+ *   3/4 型不进 `waterBasic`（否则整图变水），走 `waterDriverMt34`（`0x0059C580`）。
  */
 export function runWaterStage(state: PipelineState): void {
   const { ctx } = state;
   if (ctx.mapType === 3 || ctx.mapType === 4) {
-    throw new Error(
-      'MapType 3/4 水体驱动（0x0059C580 河切割/湖生长）尚未接线 —— 见 README 阶段表',
-    );
+    waterBasicMt34(ctx);
+    return;
   }
   waterBasic(ctx);
   waterFinalize(ctx);
@@ -239,6 +344,10 @@ export function generateWaterStage(input: GenerateInput): PipelineState {
 export function generateThroughGreen(input: GenerateInput): PipelineState {
   const state = generateWaterStage(input);
   runRegionStage(state);
+  runPlateauStage(state);   // 阶段 7（仅 3/4 型；0/1/2 型内部直接 return）
+  runBridgeStage(state);    // 阶段 8（仅 3/4 型）
+  runCliffStage(state);     // 阶段 9（仅 3/4 型）
+  runBridgeRampStage(state);// 阶段 10（仅 3/4 型）
   runGreenStage(state);
   return state;
 }

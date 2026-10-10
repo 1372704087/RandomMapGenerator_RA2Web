@@ -4,13 +4,25 @@
  * 与 `WorkingMap` 的「预置地块拼装」模型**并列**，不要合并。
  * 发射（emit）时投影到现有 `MapFile`（IsoMapPack5 + OverlayPack）。
  *
- * 字段来源（逆向规格书 §3 + vera20k `grid.rs`）：
+ * 字段来源（逆向规格书 §3 + vera20k `grid.rs` + 阶段 18 机器码复核）：
  *   CellClass：tile / subTile(+0x11A) / level(+0x11B) / slope(+0x11C) /
- *              overlay(+0x44) / density(+0x11E) / flags(+0x140) / landType(+0xEC)
+ *              density(+0x11E) / flags(+0x140) / landType(+0xEC) /
+ *              diamondCoord(+0x24) / height(+0xA0, f64) / attachments(+0xE4)
  *   RMG scratch：regionId / patchId / shore 锁 / 树访问位等（阶段间共享）
  *
+ * ⚠ **两套字段不要混**：`regionId`（RMG scratch 区域 id）与
+ *   `polyIdLookup`/`polyId`（`+0x44`/`+0x98` **多边形** id）是不同概念，
+ *   原生代码里二者同时存在且参与不同判定，**勿互相赋值**。
+ *
  * 邻接次序 `DIRECTION_OFFSETS` 是契约：`N,NE,E,SE,S,SW,W,NW`
- * （`g_DirectionOffsets 0x0089F688` 运行时填充，静态映像为 0）。
+ * （`g_DirectionOffsets 0x0089F688`，静态映像全 0、运行时由 `0x49F2F0` 填入）。
+ *
+ * ✅ **本表已由 unicorn 实跑 gamemd.exe 验证 8/8 全对**（2026-10-07，
+ * `re/oracle/dump_runtime_tables.py`）：原生 dword 表真值
+ * `FFFF0000/FFFF0001/00000001/00010001/00010000/0001FFFF/0000FFFF/FFFFFFFF`
+ * 逐项解回即本表。此前"原生表含重复项、缺 E 与 SW"的疑点已撤销
+ * —— 那是读 Hex-Rays 伪码时看错 dword 常量所致（IDA 把 `dword_89F690 = 1`
+ * 渲染成 `0x00010000`）。改动本表会连带影响阶段 5/6/12，仍需谨慎。
  */
 
 /** 未分配图块哨兵（emit → IsoMapPack 的 -1） */
@@ -82,6 +94,85 @@ export interface RmgCell {
   shoreEnabled: number;
   /** 水/桥旗标 */
   waterBridgeFlags: number;
+
+  // ---- CellClass 原生字段（阶段 18 补，2026-10-07）----
+  // ⚠ 这些是**原生 CellClass 的偏移语义**，与上面的 RMG scratch 是两套东西。
+  //   依据 `re/specs/STAGE18_GROWTH_QUEUE.md`（探针 + IDA 双源验证）。
+  //   全部有唯一构造点 `defaultRmgCell()`，加字段不影响既有阶段。
+
+  /**
+   * `CellClass+0x24` —— **菱形坐标**（dword 打包：`x = 低 16 位`, `y = 高 16 位`，
+   * 均有符号）。
+   *
+   * 这是阶段 18 堆的键（`cell.ts` 的 int32 min-heap 用它排序），
+   * 也是 `sub_578460` 坐标合法性检查的入参。
+   * ⚠ 勿与「`rx`/`ry` 网格下标」混用：菱形坐标可越界（负数），
+   *   网格下标恒为 `≥ 0`。转换用 `0x42B1C0`（菱形→线性索引）。
+   */
+  diamondCoord: number;
+
+  /**
+   * `CellClass+0x38` —— 附属表下标（门 6c 用）。
+   *
+   * 三态语义（`0x4838E0` 门 6c）：`< 0` 或 `≥ [0xA8ED38]` 直接通过；
+   * 落在区间内才查 `table_A8ED2C[idx] + 0x306`。
+   * 勿写成简单二值判断。
+   */
+  attachIndex: number;
+
+  /**
+   * `CellClass+0x44` —— 多边形 id（regionLookup 的 **key**）。
+   *
+   * `0x4838E0` 门 6a 要求它 **`== -1`**（无多边形）才可生长；
+   * 而 `0x483690`（谓词 B）要求 `regionLookup(+0x44) == +0x98`。
+   * ⚠ 与 `regionId`（RMG scratch 区域 id）**未必同一概念，勿互相赋值**。
+   */
+  polyIdLookup: number;
+
+  /** `CellClass+0x98` —— 多边形 id（**存**侧）。须与 `regionLookup(polyIdLookup)` 相等。 */
+  polyId: number;
+
+  /** `CellClass+0x9C` —— 扩散三元组的第三分量（`0x7221B0` 写入 `+0x108` 前的来源）。 */
+  spreadAux: number;
+
+  /**
+   * `CellClass+0xA0` —— **高程 / 高度（f64）**。
+   *
+   * ⚠ 不是 `level`（`+0x11B` 是 byte level 0..15）。这个是 double。
+   * 两处比较（`0x483690` 谓词 B、`0x722440`）都拿它和 `1e-05` 比
+   * ⇒ 对 level 0..15 恒真，属防御性检查。
+   */
+  height: number;
+
+  /**
+   * `CellClass+0xE4` —— 附着物链表头。
+   *
+   * 阶段 18 门 3/4 会遍历它（`+0x30` = next，`vtable+0x2C` = 类型 tag，
+   * 关心 tag `6` 与 `36`）。RMG 前期格子应为 `0`（无附着物）。
+   * `0x483780` 门 A 也要求 `+0xE4 == 0`。
+   */
+  attachments: number;
+
+  // ---- 阶段 18 扩散三元组（`0x7221B0` 写 / `0x4838E0` 读）----
+  /** `CellClass+0x100` —— 扩散归属标记，**-1 = 无** */
+  spreadKey: number;
+  /** `CellClass+0x104` —— 调用方传入的阈值/数量参数 */
+  spreadParam: number;
+  /** `CellClass+0x108` —— 距离/半径（与全局 `[0xA8ED84]` 做减法比较） */
+  spreadRadius: number;
+
+  // ---- 阶段 18 生长队列（每 cell 一份，孪生通道字段组不同）----
+  // ⚠ 原生是两套**并列**通道（`0x722240` / `0x722D00`，入口 `0x5993A0`/`0x59939B`
+  //   背靠背调用），字段组相差 0x1C：主通道 `+0xF0..`，孪生通道 `+0x10C..`。
+  //   本实现目前只建**主通道**；孪生通道接入前所有孪生字段保持初值。
+  /** `+0xF0` 主通道堆计数（入队元素数），初值 0 */
+  growthHeapCount: number;
+  /** `+0xF4` 主通道堆容器（`{count:int, ?}`，数据在 `+8`） */
+  growthHeap: number;
+  /** `+0xF8` 主通道已访问位图（byte/格） */
+  growthVisited: number;
+  /** `+0xFC` 主通道堆元素数组（每项 8 字节：`[0]=菱形坐标`, `[4]=int32 优先级`） */
+  growthHeapData: number;
 }
 
 export function defaultRmgCell(): RmgCell {
@@ -104,7 +195,55 @@ export function defaultRmgCell(): RmgCell {
     treeVisited: 0,
     shoreEnabled: 1,
     waterBridgeFlags: 0,
+
+    // ---- CellClass 原生字段（阶段 18）----
+    // 菱形坐标初值 (0,0) ⇒ dword 0
+    diamondCoord: 0,
+    // 附属表下标：初值 -1 ⇒ 门 6c 的「< 0 直接通过」分支成立
+    attachIndex: -1,
+    // 多边形 id：-1 = 无（门 6a 的通过条件）
+    polyIdLookup: -1,
+    polyId: -1,
+    spreadAux: 0,
+    height: 0,
+    // RMG 前期格子无附着物（门 A / 门 3 / 门 4 都要求 0 或查空表）
+    attachments: 0,
+
+    // ---- 阶段 18 扩散三元组 ----
+    spreadKey: -1,
+    spreadParam: 0,
+    spreadRadius: 0,
+
+    // ---- 阶段 18 生长队列（主通道）----
+    growthHeapCount: 0,
+    growthHeap: 0,
+    growthVisited: 0,
+    growthHeapData: 0,
   };
+}
+
+/**
+ * 菱形坐标 ↔ `diamondCoord` dword 打包。
+ *
+ * 原生用单个 dword 同时存 (x,y)：`x = 低 16 位`、`y = 高 16 位`，
+ * **均有符号**（依据 `0x49F2F0` 填表值 `0xFFFF0000` = (0,−1) 等）。
+ *
+ * ⚠ 这是坐标的**原生表示**，与 `RmgGrid` 的 `(rx, ry)` 网格下标不同：
+ * 菱形坐标可为负，网格下标恒 `≥ 0`。两者不要混用。
+ *
+ * ⚠ 返回值统一为**无符号**（`>>> 0`）：原生按 dword 位模式比较，
+ *   JS 若存成有符号负数，`===`/`!==` 与原生 dword 相等语义不一致。
+ *   取 x/y 用 `unpackDiamondCoord`，它内部做符号扩展。
+ */
+export function packDiamondCoord(x: number, y: number): number {
+  return (((y & 0xffff) << 16) | (x & 0xffff)) >>> 0;
+}
+
+/** `packDiamondCoord` 的逆。接受有符号或无符号 dword，返回有符号的 `[x, y]`。 */
+export function unpackDiamondCoord(dword: number): [number, number] {
+  const x = dword << 16 >> 16;
+  const y = (dword >> 16) << 16 >> 16;
+  return [x, y];
 }
 
 /** 地图几何（与 `deriveDimensions` 对齐） */

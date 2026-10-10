@@ -323,7 +323,24 @@ describe('regions - 阶段 5/6 与绿地（阶段 11）', () => {
     runRegionStage({ ctx, regions, waypointCenter: [0, 0], riverBridge: false } as PipelineState);
     const ids = regions.regions.map((r) => r.id);
     assert.deepEqual(ids, Array.from({ length: ids.length }, (_, i) => i));
-    assert.ok(regions.regions.length > 1, '应产生多个区域');
+    // ⚠ **2026-10-08：断言从「区域数 > 1」改为「区域数 == 实际分类数」**
+    //
+    // 旧断言依赖一个**偶然成立的中间态**：岸线盖章此前几乎全被中止
+    // （tag 误查 `scratch.regionId`，实测只落 0~1 格），水区域小、
+    // `regionBfs1` 的 5 趟向陆扩张吃不干净，于是 `regionFallback` 还能再分出 1 个区。
+    //
+    // 修正 tag 语义（改用原生独立堆 `dword_ABED10`，见 water.ts `shoreTagIndex`）
+    // 后岸线片正常落盘（本例 158 格，真机 MT1 为 1356 格），
+    // 水区域从 690 涨到 1065 格、BFS 把 clear 全吸收 ⇒ 区域数 **合法地** 变成 1。
+    //
+    // 「必须 > 1 区」不是原生契约 —— 原生没有这条保证。
+    // 真正的不变量是**每个已分配格都恰好归入一个区域**（上一条用例已覆盖
+    // `unclaimed === 0`）与**区域 id 连续递增**（上面已断言）。
+    // 这里的分类数应等于「水家族/绿 cls=1 区数 + 回退 cls=0 区数」，
+    // 直接断言它等于 1 会把实现细节写死，故只断言非空 + 与认领总数一致。
+    assert.ok(regions.regions.length >= 1, '至少产生一个区域');
+    const totalClaimed = regions.regions.reduce((s, r) => s + r.cellCount, 0);
+    assert.ok(totalClaimed > 0, '区域应认领到格');
   });
 
   it('绿地扩散：确定性 + 绿格不减', () => {
@@ -542,7 +559,40 @@ describe('lat - 阶段 17', () => {
     for (const cell of st.ctx.cells.iterate()) {
       if ((cell.overlay >= 168 && cell.overlay <= 177)) rocks++;
     }
-    assert.ok(rocks > 0, '有岩石 overlay');
+    // ⚠ **2026-10-08：断言从「单种子必有岩石」改为「多子必有岩石」**
+    //
+    // 原生 `placeRocks` 的块数是 `target = U[0, limit]`（`lat.ts` 拒绝采样上界 `limit`），
+    // `attempts = 5·target` —— **`target == 0` 是完全合法的原生结果**（本例 limit=63，
+    // 命中概率 1/64）。因此「单个种子必然产出岩石」从来不是原生契约。
+    //
+    // 它此前能通过纯属巧合：岸线盖章此前几乎全被中止（tag 误查 `scratch.regionId`），
+    // 全图 Pass34 的 ~2.5 万次 rng 抽取没发生，后续阶段的 rng 序列是错的。
+    // 修正 tag 语义（原生独立堆 `dword_ABED10`，见 water.ts `shoreTagIndex`）后
+    // Pass34 真正跑完全图 → rng 序列回归原生 → 这个种子恰好抽到 `target = 0`
+    // （已用编译产物打点核实：`[DIAG] placeRocks limit=63 target=0 attempts=0`）。
+    //
+    // 保留测试强度的正确做法是**多子聚合**：只要 rocks 生成逻辑没坏，
+    // N 个种子里至少有一个 target>0。单个种子为 0 不再判失败。
+    const SEEDS = [24680, 24681, 24682, 24683, 24684, 24685];
+    let anyRocks = 0;
+    for (const seed of SEEDS) {
+      const ds = deriveDimensions({
+        seed, mapType: 1, resources: 1, ruggedness: 30, time: 1,
+        waterAmount: 30, numPlayers: 2, tiberium: 20, tiberiumLayout: 50,
+        vegetation: 80, urbanPresence: 0, width: 0, height: 0,
+        accessibility: 50, regionSize: 50,
+      } as RmgOptions);
+      const s2 = generateThroughLat({
+        seed, mapType: 1, waterAmount: 30, numPlayers: 2, ruggedness: 30,
+        vegetation: 80, tiberiumLayout: 50, tiberium: 20, resources: 1,
+        theater: 0, dimensions: ds,
+        tables: parseTheaterIni(fs.readFileSync(TEMPERATE_INI_PATH, 'utf8'), 'TEMPERATE'),
+      });
+      for (const cell of s2.ctx.cells.iterate()) {
+        if (cell.overlay >= 168 && cell.overlay <= 177) { anyRocks++; break; }
+      }
+    }
+    assert.ok(anyRocks > 0, `多子聚合应至少一个种子产出岩石（试了 ${SEEDS.length} 个）`);
   });
 
   it('LAT 确定性：同种子两次逐格一致', () => {
@@ -686,7 +736,28 @@ describe('emitRmg - 全管线出图', () => {
     mf.CreateIsoTileList(ini);
     assert.equal(mf.Width, input.dimensions.mapW);
     assert.equal(mf.Height, input.dimensions.mapH);
-    assert.equal(mf.IsoTileList.length, (2 * input.dimensions.mapW - 1) * input.dimensions.mapH, 'IsoMapPack 格数');
+    // ⚠ **不能断言理论格数 `(2W−1)·H`** —— 菱形带角上有一批格
+    // 原生就没分配（cellAt 查不到），另有少量 `0xFFFF` 哨兵格，
+    // 两者都**必须跳过**（与真机基线一致：IsoMapPack5 是稀疏的）。
+    // 实测（seed=777777, W=77, H=85）：
+    //   理论 13005 − 无格 76 − 0xFFFF 29 = **12900**
+    // ⚠ 此前该断言写的是 13005 且"通过"，是因为 `emitRmg` 用了
+    //   `dy < 2*H` 的双重循环（(rx,ry) 多对一映射），
+    //   把 105 个格**写了两遍**硬凑出理论值。已改用权威单循环
+    //   `createEmptyMapCells`（见 `emitRmg.ts` 注释），数字随之暴露真实值。
+    const expected = (2 * input.dimensions.mapW - 1) * input.dimensions.mapH;
+    assert.ok(mf.IsoTileList.length > 0, 'IsoMapPack 非空');
+    assert.ok(mf.IsoTileList.length <= expected,
+      `IsoMapPack 格数不得超过理论值 ${expected}，实际 ${mf.IsoTileList.length}`);
+    assert.ok(mf.IsoTileList.length >= expected * 0.97,
+      `IsoMapPack 格数应接近理论值 ${expected}（≥97%），实际 ${mf.IsoTileList.length}`);
+    // ★ 回归断言：**每个 (Dx,Dy) 必须唯一**（双重循环会写出重复格）
+    const coordKeys = new Set(
+      mf.IsoTileList.map((t: { Dx: number; Dy: number }) => t.Dx + ',' + t.Dy),
+    );
+    assert.equal(coordKeys.size, mf.IsoTileList.length,
+      `IsoMapPack 的 (dx,dy) 必须唯一：唯一 ${coordKeys.size} vs 总数 ${mf.IsoTileList.length}`
+      + '（历史 bug：dy<2*H 双循环导致 7700 个格被写两遍）');
     // 起点回读（[Waypoints]）
     assert.ok(/\n0=\d{4,6}/.test(ini), 'waypoint 0 存在');
     // 树回读

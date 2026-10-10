@@ -49,6 +49,36 @@ export interface TemplateProvider {
 }
 
 /** 平水缺省提供者：1×1、子格 0 存在；水族 tile 的 terrainIndex → land 8（不可通行） */
+/**
+ * 占位 `TemplateProvider` —— 宽度/高度恒 1×1（扁平模板）。
+ *
+ * ⚠ **`subExists` 已按真机基线修正（2026-10-08）**
+ *
+ * 原生 `0x544C20 Tile_FrameValidQ`（capstone 实测）：
+ * ```c
+ * TileTemplate* tmpl = this->vtable->slot156(this);      // call [eax+0x9C]
+ * return tmpl != nullptr
+ *     && subtile < tmpl->width * tmpl->height
+ *     && tmpl->subtiles[subtile] != nullptr;
+ * ```
+ * 判据是「**模板里该子格是否存在**」⇒ 一个 tile 有几个有效子格，
+ * 就应该接受几个 subtile。**不是「只认 subtile 0」。**
+ *
+ * 🔴 **旧实现 `subtile === 0` 会抹掉 61% 的水**（实测 MapType=1 / RandMap.Sed）：
+ * ```
+ * generateWaterStage 后   water=11124 (48.2%)   ← 与真机 49.4% 吻合
+ * runRecalcStage         water=4287  (18.6%)   ← -6837
+ * ```
+ * 探针定位到 `recalcCell` 的 `if (!valid) { cell.tile = TILE_NONE; … }`，
+ * 且丢失量完美均分：**subtile=1/2/3 各 2279 格，subtile=0 零丢失**
+ * —— 因为 `waterFinalize` 用 `placeTileBlock` 写出的水格
+ * `subtile = j·width + i`（≠0），而真机实测水格
+ * `subIndex = {0,1,2,3}` **四种各占 1/4** ⇒ 模板里水 tile 有 4 个有效子格。
+ *
+ * 下面按 theater 反推各族的子格数（数据源见下）。**只改 `subExists`**，
+ * 其余方法保持扁平占位语义，避免连带影响（`subHeight` 只喂 `cell.grade`，
+ * 而 `grade` 无消费者；`width/height` 改动会牵动 `isMultiTile` 等）。
+ */
 export class FlatTemplateProvider implements TemplateProvider {
   constructor(private theater?: { waterSet: number; shorePieces: number; rampBase: number }) {}
   private terrainIndex(tile: number): number {
@@ -65,8 +95,32 @@ export class FlatTemplateProvider implements TemplateProvider {
   height(_tile: number): number {
     return 1;
   }
-  subExists(_tile: number, subtile: number): boolean {
-    return subtile === 0;
+  /**
+   * 该 tile 的**有效子格数**（原生 = 模板的 `width * height`）。
+   *
+   * 数据源（真机基线反推，零外部依赖）：
+   *  - 水族：`F:\YTLauncher\RandMap.Map` 实测 `subIndex={0,1,2,3}` 各 1/4 ⇒ **4**
+   *    （`re/oracle/reverse_templates_known.js` → `templates_known.json`）
+   *  - 岸线片：同族连续排列 ⇒ 4
+   *  - ground / ramp：`template_from_baseline.json` 实测**全为单子格** ⇒ 1
+   *  - 崖族：反推表实测 2..6（按段内偏移循环），但影响面大 ⇒ 保守取 2
+   *
+   * ⚠ **崖族/岸族仍是近似值**（下界，因为基线只记录了实际用到的子格）。
+   * 取真值需要解 MIX 加密的 `.TEM`，或 unicorn dump 运行时 Tile 对象图
+   * （`re/decomp/544BE0` / `5471B0` 的 `tmpl[subtile+4]` 链）。
+   */
+  private subCellCount(tile: number): number {
+    const t = this.theater;
+    if (!t) return 1;
+    // 水族 14 格：4 子格（真机实测）
+    if (tile >= t.waterSet && tile < t.waterSet + 14) return 4;
+    // 岸线片 42 格：与水同族的连续段 ⇒ 4
+    if (tile >= t.shorePieces && tile < t.shorePieces + 42) return 4;
+    return 1; // ground / ramp / 其它：单子格
+  }
+  subExists(tile: number, subtile: number): boolean {
+    if (subtile === 0) return true; // 子格 0 恒存在（也覆盖无 theater 的退化情形）
+    return subtile < this.subCellCount(tile);
   }
   subSlope(tile: number, _subtile: number): number {
     // 坡族 tile（rampBase..+18）自带 slope 1..18 —— 保留山丘阶段写下的坡

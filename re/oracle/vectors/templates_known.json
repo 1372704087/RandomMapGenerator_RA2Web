@@ -1,0 +1,1747 @@
+{
+  "source": "F:/YTLauncher/RandMap.Map (theater=0 TEMPERATE, MapType=1, seed=40708, 8p)",
+  "caveat": "subIndex 映射为实测集合；模板维度 w*h 是其上界（原生用 subtile % (w*h)）。",
+  "theater": {
+    "cliffSet": 49,
+    "waterSet": 314,
+    "shorePieces": 89,
+    "rampBase": 29
+  },
+  "summary": {
+    "distinctTiles": 129,
+    "globalSubIndex": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "multiSubTiles": 48,
+    "maxSubCount": 6,
+    "byFamily": {
+      "ground": {
+        "n": 46,
+        "multi": 0,
+        "maxSub": 1
+      },
+      "ramp": {
+        "n": 13,
+        "multi": 0,
+        "maxSub": 1
+      },
+      "cliff": {
+        "n": 56,
+        "multi": 40,
+        "maxSub": 6
+      },
+      "water": {
+        "n": 14,
+        "multi": 8,
+        "maxSub": 4
+      }
+    }
+  },
+  "tiles": [
+    {
+      "tile": 0,
+      "family": "ground",
+      "samples": 5861,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 4,
+      "minLevel": 3,
+      "maxLevel": 6
+    },
+    {
+      "tile": 29,
+      "family": "ramp",
+      "samples": 2,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 3,
+      "maxLevel": 3
+    },
+    {
+      "tile": 30,
+      "family": "ramp",
+      "samples": 3,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 3,
+      "maxLevel": 3
+    },
+    {
+      "tile": 32,
+      "family": "ramp",
+      "samples": 1,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 33,
+      "family": "ramp",
+      "samples": 148,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 34,
+      "family": "ramp",
+      "samples": 140,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 35,
+      "family": "ramp",
+      "samples": 127,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 36,
+      "family": "ramp",
+      "samples": 135,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 37,
+      "family": "ramp",
+      "samples": 127,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 38,
+      "family": "ramp",
+      "samples": 117,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 39,
+      "family": "ramp",
+      "samples": 106,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 40,
+      "family": "ramp",
+      "samples": 112,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 45,
+      "family": "ramp",
+      "samples": 7,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 3,
+      "maxLevel": 4
+    },
+    {
+      "tile": 46,
+      "family": "ramp",
+      "samples": 9,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 89,
+      "family": "cliff",
+      "samples": 44,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 90,
+      "family": "cliff",
+      "samples": 28,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 91,
+      "family": "cliff",
+      "samples": 36,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 92,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 2,
+      "subIndex": [
+        0,
+        1
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 93,
+      "family": "cliff",
+      "samples": 72,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 94,
+      "family": "cliff",
+      "samples": 66,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 95,
+      "family": "cliff",
+      "samples": 28,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 96,
+      "family": "cliff",
+      "samples": 48,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 97,
+      "family": "cliff",
+      "samples": 16,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 98,
+      "family": "cliff",
+      "samples": 36,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 99,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 100,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 2,
+      "subIndex": [
+        0,
+        1
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 101,
+      "family": "cliff",
+      "samples": 42,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 102,
+      "family": "cliff",
+      "samples": 42,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 103,
+      "family": "cliff",
+      "samples": 24,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 104,
+      "family": "cliff",
+      "samples": 44,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 105,
+      "family": "cliff",
+      "samples": 44,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 106,
+      "family": "cliff",
+      "samples": 36,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 107,
+      "family": "cliff",
+      "samples": 52,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 108,
+      "family": "cliff",
+      "samples": 22,
+      "subCount": 2,
+      "subIndex": [
+        0,
+        1
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 109,
+      "family": "cliff",
+      "samples": 36,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 110,
+      "family": "cliff",
+      "samples": 60,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 111,
+      "family": "cliff",
+      "samples": 28,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 112,
+      "family": "cliff",
+      "samples": 52,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 113,
+      "family": "cliff",
+      "samples": 40,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 114,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 115,
+      "family": "cliff",
+      "samples": 24,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 116,
+      "family": "cliff",
+      "samples": 30,
+      "subCount": 2,
+      "subIndex": [
+        0,
+        1
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 117,
+      "family": "cliff",
+      "samples": 48,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 118,
+      "family": "cliff",
+      "samples": 42,
+      "subCount": 6,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 119,
+      "family": "cliff",
+      "samples": 24,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 120,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 121,
+      "family": "cliff",
+      "samples": 52,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 122,
+      "family": "cliff",
+      "samples": 24,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 123,
+      "family": "cliff",
+      "samples": 40,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 124,
+      "family": "cliff",
+      "samples": 28,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 125,
+      "family": "cliff",
+      "samples": 44,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 126,
+      "family": "cliff",
+      "samples": 36,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 127,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 128,
+      "family": "cliff",
+      "samples": 24,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 131,
+      "family": "cliff",
+      "samples": 308,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 133,
+      "family": "cliff",
+      "samples": 88,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 134,
+      "family": "cliff",
+      "samples": 85,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 135,
+      "family": "cliff",
+      "samples": 54,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 136,
+      "family": "cliff",
+      "samples": 95,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 137,
+      "family": "cliff",
+      "samples": 29,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 138,
+      "family": "cliff",
+      "samples": 40,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 139,
+      "family": "cliff",
+      "samples": 28,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 140,
+      "family": "cliff",
+      "samples": 73,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 141,
+      "family": "cliff",
+      "samples": 52,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 142,
+      "family": "cliff",
+      "samples": 30,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 143,
+      "family": "cliff",
+      "samples": 29,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 144,
+      "family": "cliff",
+      "samples": 50,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 145,
+      "family": "cliff",
+      "samples": 32,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 146,
+      "family": "cliff",
+      "samples": 38,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 147,
+      "family": "cliff",
+      "samples": 49,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 314,
+      "family": "water",
+      "samples": 1584,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 315,
+      "family": "water",
+      "samples": 1692,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 316,
+      "family": "water",
+      "samples": 1716,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 317,
+      "family": "water",
+      "samples": 1664,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 318,
+      "family": "water",
+      "samples": 1708,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 319,
+      "family": "water",
+      "samples": 1772,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 320,
+      "family": "water",
+      "samples": 48,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 321,
+      "family": "water",
+      "samples": 56,
+      "subCount": 4,
+      "subIndex": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 322,
+      "family": "water",
+      "samples": 266,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 323,
+      "family": "water",
+      "samples": 233,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 324,
+      "family": "water",
+      "samples": 248,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 325,
+      "family": "water",
+      "samples": 242,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 326,
+      "family": "water",
+      "samples": 227,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 327,
+      "family": "water",
+      "samples": 7,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 418,
+      "family": "ground",
+      "samples": 62,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 420,
+      "family": "ground",
+      "samples": 15,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 421,
+      "family": "ground",
+      "samples": 35,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 422,
+      "family": "ground",
+      "samples": 20,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 423,
+      "family": "ground",
+      "samples": 20,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 424,
+      "family": "ground",
+      "samples": 9,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 425,
+      "family": "ground",
+      "samples": 18,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 426,
+      "family": "ground",
+      "samples": 14,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 427,
+      "family": "ground",
+      "samples": 21,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 428,
+      "family": "ground",
+      "samples": 24,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 429,
+      "family": "ground",
+      "samples": 6,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 430,
+      "family": "ground",
+      "samples": 14,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 431,
+      "family": "ground",
+      "samples": 24,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 432,
+      "family": "ground",
+      "samples": 18,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 433,
+      "family": "ground",
+      "samples": 11,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 434,
+      "family": "ground",
+      "samples": 27,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 493,
+      "family": "ground",
+      "samples": 265,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 495,
+      "family": "ground",
+      "samples": 125,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 496,
+      "family": "ground",
+      "samples": 96,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 497,
+      "family": "ground",
+      "samples": 39,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 498,
+      "family": "ground",
+      "samples": 119,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 499,
+      "family": "ground",
+      "samples": 11,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 500,
+      "family": "ground",
+      "samples": 45,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 501,
+      "family": "ground",
+      "samples": 20,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 502,
+      "family": "ground",
+      "samples": 92,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 503,
+      "family": "ground",
+      "samples": 42,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 504,
+      "family": "ground",
+      "samples": 8,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 505,
+      "family": "ground",
+      "samples": 27,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 506,
+      "family": "ground",
+      "samples": 46,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 507,
+      "family": "ground",
+      "samples": 20,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 508,
+      "family": "ground",
+      "samples": 23,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 5
+    },
+    {
+      "tile": 509,
+      "family": "ground",
+      "samples": 9,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 4,
+      "maxLevel": 6
+    },
+    {
+      "tile": 510,
+      "family": "ground",
+      "samples": 45,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 511,
+      "family": "ground",
+      "samples": 32,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 512,
+      "family": "ground",
+      "samples": 127,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 513,
+      "family": "ground",
+      "samples": 40,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 3,
+      "maxLevel": 4
+    },
+    {
+      "tile": 514,
+      "family": "ground",
+      "samples": 37,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 515,
+      "family": "ground",
+      "samples": 147,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 516,
+      "family": "ground",
+      "samples": 39,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 1,
+      "minLevel": 4,
+      "maxLevel": 4
+    },
+    {
+      "tile": 517,
+      "family": "ground",
+      "samples": 41,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 518,
+      "family": "ground",
+      "samples": 142,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 519,
+      "family": "ground",
+      "samples": 57,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 3,
+      "maxLevel": 4
+    },
+    {
+      "tile": 520,
+      "family": "ground",
+      "samples": 56,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 521,
+      "family": "ground",
+      "samples": 139,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 3,
+      "minLevel": 3,
+      "maxLevel": 5
+    },
+    {
+      "tile": 65535,
+      "family": "ground",
+      "samples": 15,
+      "subCount": 1,
+      "subIndex": [
+        0
+      ],
+      "levelCount": 2,
+      "minLevel": 4,
+      "maxLevel": 6
+    }
+  ]
+}

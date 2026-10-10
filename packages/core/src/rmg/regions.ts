@@ -47,6 +47,22 @@ export interface RmgRegion {
   cells: number[];
   /** +0x40..+0x4C bbox {x0,y0,w,h} */
   bbox: [number, number, number, number];
+  /**
+   * 阶段 8（`0x58F0C0`）：与本区域**相邻的其他区域 id 列表**。
+   *
+   * 原生存在 `region+0x04` 的 DynamicVector 里（`0x58F0C0` 填充），
+   * 本仓用普通数组承载。`bridgePair5x5` 读它做区域配对。
+   */
+  neighbors?: number[];
+  /**
+   * 阶段 8（`0x5905D0`）：记录到的连桥对（目标区域 id）。
+   *
+   * ⚠ **只记账不落地** —— 原生此处调 `sub_58F2C0(A,B)` 写 ramp/brick tile，
+   * 该函数**未移植**，所以桥目前不会真的出现在地图上。
+   */
+  bridges?: number[];
+  /** 内部：反查同表其他区域（对应原生 `dword_ABDF94` 全局表的线性搜索） */
+  __all?: RmgRegion[];
 }
 
 /** 区域阶段全局状态（挂到管线上下文） */

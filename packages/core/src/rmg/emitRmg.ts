@@ -17,6 +17,7 @@ import { Overlay } from '../tile/overlay';
 import { IsoTile } from '../tile/isoTile';
 import { IniFile } from '../io/iniFile';
 import { rmgTheaterToEnum } from './emit';
+import { createEmptyMapCells } from './cell';
 import { coordOfCell, WaterContext } from './water';
 import { TechStructure } from './tech';
 
@@ -61,24 +62,42 @@ export function emitRmgMapFile(
     cellAt.set(`${xd},${yd}`, cell);
   }
   const offsetX = 1; // playfield (mx,my)=(0,0) → (rx,ry)=(1,W)
-  for (let dy = 0; dy < 2 * H; dy++) {
-    for (let dx = 0; dx < 2 * W - 1; dx++) {
-      // CreateEmptyMap 同源枚举：rx = (dx+dy)/2+1, ry = dy−rx+W+1
-      if ((dx + dy) % 2 !== 0 && dx % 2 === 0) continue; // 不存在的格（dx,dy 奇偶需匹配）
-      const rx = Math.floor((dx + dy) / 2) + 1;
-      const ry = dy - rx + W + 1;
-      if (rx < offsetX) continue;
+  // 🔴 **必须用 `createEmptyMapCells` 的权威单循环枚举，不能用 `dy < 2*H` 的双重循环。**
+  //
+  // 双重循环（`dy < 2*H` × `dx < 2*W−1`）会枚举 **46368** 个候选，
+  // 但 `(rx,ry) = ((dx+dy)/2+1, dy−rx+W+1)` 是**多对一**映射 ——
+  // 相邻的 `(dx,dy)` 与 `(dx+1,dy−1)` 落在**同一个格**上：
+  // ```
+  // 双循环枚举 = 46368  ⇒ 去重后 = 23184（正好 2 倍），重复 = 11536
+  // ```
+  // 实测后果（MapType=1 / RandMap.Sed，与真机同参数）：
+  // ```
+  // 真机 IsoMapPack5：23184 条，(dx,dy) 重复 = 0
+  // 我们          ：23184 条，(dx,dy) 重复 = 7700  ← ★ 只有 15484 个唯一格
+  // ```
+  // 因为 `IsoTileList` 每条都 push 一个 `IsoTile`，重复格会被写两遍，
+  // 读者按顺序取用时会看到**错位的 tile**（水格被后面的 clear 覆盖）。
+  //
+  // 权威枚举见 `cell.ts:291 createEmptyMapCells`：`(2W−1)·H` 个格，
+  // `dy = y*2 + (x%2)` 保证每格只出现一次。
+  for (const [rx, ry, dx, dy] of createEmptyMapCells(W, H)) {
+    if (rx < offsetX) continue;
       const cell = cellAt.get(`${rx},${ry}`);
-      const tile = cell ? (cell.tile === 0xffff ? -1 : cell.tile) : -1;
-      const level = cell ? cell.level : 0;
-      const subTile = cell ? cell.subTile & 0xff : 0;
-      mapFile.IsoTileList.push(new IsoTile(dx, dy, rx, ry, level & 0xff, tile, subTile));
-      if (cell && cell.overlay >= 0) {
+      // ⚠ **跳过未分配的格**（对齐真机基线 `Random Map.yrm` 的实测行为）。
+      // 原版 IsoMapPack5 是稀疏的：未触的格**不出现**，
+      // 实测基线 29161 个 tile 里 `TileIndex < 0` 的个数为 **0**
+      // （`TileIndex == 0` 有 5783 个，那是合法的 clear tile，不是哨兵）。
+      // 此前无条件 push 且把 0xffff 映射成 −1，导致输出里混入 760 个
+      // `TileIndex = 0xFFFF` —— 游戏读回时会当无效 tile 处理。
+      if (!cell || cell.tile === 0xffff) continue;
+      const level = cell.level & 0xff;
+      const subTile = cell.subTile & 0xff;
+      mapFile.IsoTileList.push(new IsoTile(dx, dy, rx, ry, level, cell.tile, subTile));
+      if (cell.overlay >= 0) {
         const ov = new Overlay(cell.overlay & 0xff, cell.density & 0xff);
         ov.Tile = mapFile.IsoTileList[mapFile.IsoTileList.length - 1];
         mapFile.OverlayList.push(ov);
       }
-    }
   }
 
   // [Terrain]（树/TIBTRE，map 坐标）
@@ -128,23 +147,31 @@ export function emitRmgMapIni(
   const mapFile = emitRmgMapFile(ctx, waypoints, structures);
   const ini = mapFile.SaveFullMap(undefined, { bottomSpace: 0 });
   const meta = new IniFile(ini);
-  meta.SetStringValue('Header', 'NumberStartingPoints', String(input.numPlayers));
-  meta.SetStringValue('Basic', 'Name', input.name ?? 'Random Map');
-  meta.SetStringValue('Basic', 'MaxPlayer', String(input.numPlayers));
-  meta.SetStringValue('Basic', 'MinPlayer', '1');
-  meta.SetStringValue('Map', 'Level', '4');
-  meta.SetStringValue('Lighting', 'Ambient', '0.75');
-  meta.SetStringValue('Lighting', 'RedTint', '1.0');
-  meta.SetStringValue('Lighting', 'GreenTint', '1.0');
+  // ⚠ [Header] Width/Height 由 `CalculateStartingWaypoints` 从 [Map] LocalSize 推导
+  //   （Width = localWidth − 1、Height = localHeight），不调它就会留 0。
+  //   该口径已与真机基线 `Random Map.yrm` 实测一致：
+  //   Header.Width=116 vs LocalSize 宽=117（差 1，菱形带 x 上界）、
+  //   Header.Height=107 = LocalSize 高。
+  //   顺带由它把 Waypoint1..8 与玩家数元数据写好。
+  const withWaypoints = mapFile.CalculateStartingWaypoints(meta.WriteIniFile());
+  const out = new IniFile(withWaypoints);
+  out.SetStringValue('Header', 'NumberStartingPoints', String(input.numPlayers));
+  out.SetStringValue('Basic', 'Name', input.name ?? 'Random Map');
+  out.SetStringValue('Basic', 'MaxPlayer', String(input.numPlayers));
+  out.SetStringValue('Basic', 'MinPlayer', '1');
+  out.SetStringValue('Map', 'Level', '4');
+  out.SetStringValue('Lighting', 'Ambient', '0.75');
+  out.SetStringValue('Lighting', 'RedTint', '1.0');
+  out.SetStringValue('Lighting', 'GreenTint', '1.0');
   meta.SetStringValue('Lighting', 'BlueTint', '1.0');
   meta.SetStringValue('Lighting', 'Ground', '0.0');
-  meta.SetStringValue('Lighting', 'IonAmbient', '0.75');
-  meta.SetStringValue('Lighting', 'IonRed', '0.3');
-  meta.SetStringValue('Lighting', 'IonGreen', '0.4');
-  meta.SetStringValue('Lighting', 'IonBlue', '0.75');
-  meta.SetStringValue('Lighting', 'IonGround', '0.0');
-  meta.SetStringValue('Lighting', 'IonLevel', '0.0');
-  return meta.WriteIniFile();
+  out.SetStringValue('Lighting', 'IonAmbient', '0.75');
+  out.SetStringValue('Lighting', 'IonRed', '0.3');
+  out.SetStringValue('Lighting', 'IonGreen', '0.4');
+  out.SetStringValue('Lighting', 'IonBlue', '0.75');
+  out.SetStringValue('Lighting', 'IonGround', '0.0');
+  out.SetStringValue('Lighting', 'IonLevel', '0.0');
+  return out.WriteIniFile();
 }
 
 /** map 中心（mx=W/2, my=H/2）的菱形坐标 */

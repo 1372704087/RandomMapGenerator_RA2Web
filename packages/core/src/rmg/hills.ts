@@ -394,7 +394,12 @@ export function morphAt(
     }
     const delta = 15 * (dir > 0 ? 1 : -1);
     const nh = g.height[gi] + delta;
-    if (nh < 0 || nh > 180) {
+    // ⚠ **原生 `0x6B4240`（size=0x104）没有任何高度夹取** —— 实测全部 cmp 只有：
+    //   `cmp ecx,esi` / `cmp ecx,edi`（求 min/max，初值 esi=1000 / edi=−1）
+    //   `cmp byte [edx],0`（LOCK）/ `cmp ecx,4`（4 个角）
+    //  此前移植的 `nh > 180 ⇒ 跳过` 是**臆造的**，
+    //  它把 level 卡在 0..6（基线是 0..12）⇒ 实测 5 轮 hills 仍收敛在 0..6。
+    if (nh < 0) {
       // 越界：还原不入栈
       g.visited[gi] = 1;
       if (!propagate(ctx, hs, dir, force, g.ox + (gi % g.stride), g.oy + Math.floor(gi / g.stride)) && force === 0) {
@@ -423,9 +428,33 @@ function rollback(hs: HillsState): void {
   }
 }
 
-/** 6B3850：收尾 —— 由四角反推 level/slope/tile */
+/**
+ * `FinalizeElevationSlopes` = `sub_6B3850`（`MapGenHills.cpp:898`）。
+ *
+ * 🔴 **上一版多了一步 `g.height[c] -= mn`（四角归零），原生没有。**
+ * 原生在 `slope < 0`（位形不在 19 行表里）时 `continue`，而无论匹配与否
+ * 都**不消费角点**——网格在函数末尾整体 `clear()`。
+ * 那步归零把后续格子看到的角点高度削掉 15 ⇒
+ * 「恰好 15 落差」再也构不出来 ⇒ **slope 1~4 恒为 0**，
+ * 而 `SubIdx`（= Height）因此只有 4 种（真机 12 种）——
+ * 这是「渲染出来单调」的头号根因。已删除。
+ *
+ * 【原生逐条】
+ *  1. 只看**四角至少有一个 touched** 的格（`0x6b38c7`）；
+ *  2. 四角取 `e(x,y) / e(x+1,y) / e(x+1,y+1) / e(x,y+1)`（该顺序很重要，
+ *     它与 `kSlopeCorners` 的列序一一对应）；
+ *  3. `highest − lowest > 15` ⇒ 跳过（跨两级以上不算坡）；
+ *  4. `CanHostSlope(x, y)` 四条门：菱形内 / overlay==-1 / 无建筑 / `work+69` 清 / tile 可 morph；
+ *  5. **崖壁抑制门**：若某个**正交**邻格是 CliffSet tile 且 `Level − 新 level >= 2`，
+ *     则要求同方向存在一个 `Level == 新 level` 的 CliffSet 格（它的美术自带中间墙面），
+ *     否则整格跳过（**只算正交，对角不算**——对角 L4/L8 挨着是合法配置）。
+ *  6. `cell->Level = lowest / 15` **先写**，再查表 ⇒
+ *     即使位形不在表里，level 也已更新（只是 slope/tile 不动）；
+ *  7. 查 `kSlopeCorners` 19 行；命中则
+ *     `SlopeIndex = slope`、`IsoTileTypeIndex = slope ? rampBase + slope − 1 : clearTile`。
+ */
 export function cornerFinalize(ctx: WaterContext, hs: HillsState): void {
-  const { cells, theater: t } = ctx;
+  const { cells, theater: t, scratch } = ctx;
   const g = hs.grid;
   for (const cell of cells.iterate()) {
     const [x, y] = coordOfCell(ctx, cell);
@@ -440,24 +469,47 @@ export function cornerFinalize(ctx: WaterContext, hs: HillsState): void {
     const hs4 = corners.map((c) => g.height[c]);
     const mn = Math.min(...hs4, 1000);
     const mx = Math.max(...hs4, 0);
-    if (mx - mn > 15) continue;
-    // 资格门
+    if (mx - mn > 15) continue; // 跨两级以上 ⇒ 不算坡
+
+    // ── 资格门（原生 `CanHostSlope` = `sub_6B2520`）──
     if (
       !cells.inDiamondBounds(x, y) ||
       cell.overlay !== -1 ||
       cell.occupied !== 0 ||
-      ctx.scratch.at(x, y).waterLock !== 0
+      scratch.at(x, y).waterLock !== 0
     ) {
       continue;
     }
-    if (
-      cell.tile < ctx.isoTileTypeCount &&
-      cell.tile !== 0xffff &&
-      !tileMorphable(t, cell.tile)
-    ) {
+    // 原生是 `IsMorphableTile(cell->IsoTileTypeIndex)`：**越界与 0xFFFF 都算可 morph**，
+    // 只有越界内的具体 tile 才查表。
+    if (cell.tile < ctx.isoTileTypeCount && cell.tile !== 0xffff && !tileMorphable(t, cell.tile)) {
       continue;
     }
-    cell.level = Math.trunc(mn / 15);
+
+    // ── 崖壁抑制门（原生 `FinalizeElevationSlopes` 的 port tuning 块）──
+    // 只看正交邻格；要求同方向有一块同 level 的崖片格（其美术自带中间墙面）。
+    const newLevel = Math.trunc(mn / 15);
+    {
+      const oDX = [0, 1, 0, -1];
+      const oDY = [-1, 0, 1, 0];
+      const inCliff = (t2: number) => t2 >= t.cliffSet && t2 <= t.cliffSet + 39;
+      let block = false;
+      for (let sd = 0; sd < 4 && !block; sd++) {
+        const oq = cells.slotAt(x + oDX[sd], y + oDY[sd]);
+        if (oq && inCliff(oq.tile) && oq.level - newLevel >= 2) block = true;
+      }
+      if (block) {
+        let sameLevelFoot = false;
+        for (let sd = 0; sd < 4 && !sameLevelFoot; sd++) {
+          const sq = cells.slotAt(x + oDX[sd], y + oDY[sd]);
+          if (sq && inCliff(sq.tile) && sq.level === newLevel) sameLevelFoot = true;
+        }
+        if (!sameLevelFoot) continue;
+      }
+    }
+
+    // level 先写，再查表（原生 0x6b39dc）
+    cell.level = newLevel;
     const deltas = hs4.map((h) => h - mn);
     let matched = -1;
     for (let s = 0; s < RAMP_TABLE.length; s++) {
@@ -472,17 +524,16 @@ export function cornerFinalize(ctx: WaterContext, hs: HillsState): void {
         break;
       }
     }
-    if (matched >= 0) {
-      cell.slope = matched;
-      cell.tile = matched === 0 ? t.clearTile : t.rampBase + matched - 1;
-    }
-    for (const c of corners) g.height[c] -= mn;
+    if (matched < 0) continue; // 原生 0x6b3a25 → LABEL_36：level 已写，slope/tile 不动
+
+    cell.slope = matched;
+    cell.tile = matched === 0 ? t.clearTile : t.rampBase + matched - 1;
   }
 }
 
 /** 5A35F0 尾：2×2 坡象限清理（零 RNG） */
 export function quadrantCleanup(ctx: WaterContext): void {
-  const { cells } = ctx;
+  const { cells, theater: t } = ctx;
   for (const cell of cells.iterate()) {
     const slope = cell.slope;
     if (slope !== 5 && slope !== 11) continue;
@@ -505,6 +556,34 @@ export function quadrantCleanup(ctx: WaterContext): void {
       }
     }
     if (!ok) continue;
+
+    // ── 崖坡抑制门（原生 `MergeSlopeBlocks` 的 port tuning 块）──
+    // 紧贴 CliffRamps(0..9) 或 CliffSet(0..39) 的坡块**不许**塌成 0xFFFF：
+    // 原版存图里这类接缝从不带 0xFFFF，塌了就会在坡道旁留白墙三角。
+    // 探测范围是 4 格块的 3×3 邻域（跳过块内另外三格）。
+    let touchesArt = false;
+    for (let k = 0; k < 4 && !touchesArt; k++) {
+      const bx = x + offs[k][0];
+      const by = y + offs[k][1];
+      for (let adx = -1; adx <= 1 && !touchesArt; adx++) {
+        for (let ady = -1; ady <= 1; ady++) {
+          if (adx === 0 && ady === 0) continue;
+          const ax = bx + adx;
+          const ay = by + ady;
+          if (ax >= x && ax <= x + 1 && ay >= y && ay <= y + 1) continue;
+          const aq = cells.slotAt(ax, ay);
+          if (!aq) continue;
+          const at = aq.tile;
+          if ((t.cliffRamps >= 0 && at >= t.cliffRamps && at <= t.cliffRamps + 9) ||
+              (t.cliffSet >= 0 && at >= t.cliffSet && at <= t.cliffSet + 39)) {
+            touchesArt = true;
+            break;
+          }
+        }
+      }
+    }
+    if (touchesArt) continue;
+
     for (const q of quad) {
       q.tile = 0xffff;
       q.subTile = 0;

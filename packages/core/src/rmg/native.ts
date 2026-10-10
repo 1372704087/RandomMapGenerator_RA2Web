@@ -239,6 +239,17 @@ export interface ScratchSlot {
   regionId: number;
   /** +0x3C 补丁 id / BFS 戳 / blob 认领 */
   patchId: number;
+  /**
+   * 阶段 3/4 的 **blob 领地**（原生 `dword_ABED10 + 80·i + 56`，byte +56）。
+   *
+   * ⚠ 与 `patchId(+0x3C)` 是两个**不同**的存储：
+   *   - `+56` = blob 领地，**跨调用持久**（河切割写完，随后的湖生长仍可见）；
+   *   - `+3C` = BFS 戳，`0x59C920` 入口每轮清零（`s.patchId = 0`）。
+   * 把领地塞进 `patchId` 会被那次清零抹成 0，
+   * 而 `0 >= 0` 会被判成"已被别的 blob 认领" ⇒ 湖洪泛第一格就中止。
+   * `-1` = 未认领。
+   */
+  blobOwner: number;
   /** +0x40 岸线掩码缓存（-1 未算） */
   shoreMask: number;
   /** +0x45 水/岸锁 */
@@ -269,6 +280,7 @@ export class ScratchGrid {
         latSand: 0,
         regionId: 0,
         patchId: 0,
+        blobOwner: -1,
         shoreMask: -1,
         waterLock: 0,
         treeVisited: 0,

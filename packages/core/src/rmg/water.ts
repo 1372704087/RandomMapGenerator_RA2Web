@@ -70,6 +70,15 @@ export interface WaterContext {
   tiberiumLayout: number;
   /** 0x00ABE028 起点配额（原生恒 4） */
   startQuota: number;
+  /**
+   * MapSeed+0x304 —— **已用水面积累加**（`0x59C920` 的 `this+193`）。
+   *
+   * 湖生长用 `budget = trunc(W·H·waterAmount·0.008 + 100)` 算预算，
+   * 再减去本值得到 `remain`；`remain <= 75` 直接放弃生长。
+   * 每成功生长一个湖要把它累加回去（否则会无限长湖）。
+   * 0/1/2 型不走这条路径，留 0 即可。
+   */
+  waterUsedArea?: number;
   /** MapSeed+0x40 Resources 档（1..3） */
   resources: number;
   /** MapSeed+0x54 Tiberium %（阶段 15） */
@@ -87,6 +96,33 @@ export interface WaterContext {
     rules: { cliffBackImpassability: number };
     templates: import('./recalc').TemplateProvider;
   };
+  /**
+   * 岸线盖章的**独立 tag 网格**（原生 `dword_ABED10` 堆）。
+   *
+   * 🔴 **2026-10-08 修正：它与 `scratch.regionId` 是两个不同的存储。**
+   * `0x57A0C0` 入口每次调用都 `operator new(80·N²)` + `sub_58BDC0` 重建这堆，
+   * 而 `sub_58BDC0` 把 `+56`（即 tag 字段）清为 **0**；
+   * `sub_5A00C0` 读的正是 `ABED10[x + 89C2DC·y] + 56`，
+   * `sub_5A0090` 写的也是同一处 —— **与 scratch 数组毫无关系**。
+   *
+   * 此前本仓把 `scratch.regionId` 当 tag 用，而 map-prep 之后它已被
+   * 水体阶段写成 **−1**（`water.ts` 的 `regionId = -1` 初始化），
+   * 于是 `sub_5A00C0` 语义下的「tag > 0 且 ≠ 传入 tag」被误判成
+   * 「−1 ≠ tag 恒真」，Pass1 立刻 `return 0` 中止整条盖章链。
+   *
+   * 实测（`re/probe_shore2.js`）：MT1/MT3 的 `mode=0` 岸线片 0/1 格，
+   * 改用独立网格后 589/1154 格（真机 1356/544）。
+   *
+   * 缺省时由 `shoreFinalize` 自动分配/释放（对齐原生每次调用重建）。
+   */
+  shoreTags?: Int32Array;
+}
+
+/** 岸线 tag 网格的线性下标（原生 `x + 89C2DC·y`，stride = linearW） */
+function shoreTagIndex(ctx: WaterContext, xd: number, yd: number): number {
+  const tags = ctx.shoreTags;
+  if (tags === undefined) return 0;
+  return yd * ctx.scratch.size + xd;
 }
 
 // ─── tile 族谓词（原生 0x00486380 / 0x00485060 / 0x004865B0 / 0x004865D0 / 0x004867B0）
@@ -125,7 +161,7 @@ function inRange(v: number, base: number, len: number): boolean {
 }
 
 /** `DiamondToCell 0x005657A0` 语义：带外 → 哨兵（共享可写） */
-function cellAtD(ctx: WaterContext, x: number, y: number): NativeCell {
+export function cellAtD(ctx: WaterContext, x: number, y: number): NativeCell {
   return ctx.cells.cellAt(x, y);
 }
 
@@ -817,7 +853,32 @@ export function waterFinalize(ctx: WaterContext): void {
         do {
           v = ftol(chopMul(rng.next(), chopMul(242, K)));
         } while (v > 0xf1);
-        const idx = v >= 0xf0 ? 0xf7 - v : (v / 10) | 0;
+        // 🔴 **2026-10-08 修正：除数是 40，不是 10**（capstone 实测 `59C630`）。
+        //
+        // 汇编 `59C74B..59C75C`：
+        // ```asm
+        // cmp  ecx, 0F0h
+        // jl   loc_59C74B            ; ecx < 240 → 走除法
+        // mov  edi, 0F7h / sub edi, ecx / jmp ⇒ edi = 247 − ecx   ; ecx ∈ {240,241} → {7,6}
+        // loc_59C74B:
+        // mov  eax, 66666667h
+        // imul ecx                   ; 64 位积
+        // sar  edx, 4                ; >>36
+        // mov  ecx, edx / shr ecx,1Fh / add edx, ecx   ; 符号修正
+        // mov  edi, edx              ; edi = floor(ecx / 40)
+        // ```
+        // `0x66666667 / 2^36 = 0.025 = 1/40`（魔数除法，标准编译器序列）。
+        //
+        // 旧实现写 `(v / 10) | 0` ⇒ 值域 [0,23] ⇒ tile **314..337**，
+        // **越出水族 14 格边界**（真机水 tile 绝无 328..337），并连带打挂
+        // `water - 形状 0/2 水陆共存` 单测。
+        //
+        // 真机双向验证（`re/tile_hist.js` / `re/our_hist.js`）：
+        //   正确 `/40`：ecx∈[0,241] ⇒ edi∈[0,7] ⇒ tile 314..321（8 种）
+        //     其中 edi∈[0,5] 各约 16.5%（每档 40 个 ecx），edi=6/7 各仅 1 个 ecx（~0.41%）
+        //   真机 RandMap6 实测：`314..319` 各 1660~2164（高频）、`320:52 321:48`（极稀有）
+        //   ⇒ **6 高 + 2 稀 = 8 种**，与 `/40` 的概率分布逐档吻合。
+        const idx = v >= 0xf0 ? 0xf7 - v : (v / 40) | 0;
         const tag = scratch.at(x, y).regionId;
         placeTileBlock(ctx, theater.waterSet + idx, x, y, tag, -1);
         continue;
@@ -827,6 +888,8 @@ export function waterFinalize(ctx: WaterContext): void {
     do {
       v = ftol(chopMul(rng.next(), chopMul(201, K)));
     } while (v > 0xc8);
+    // 同理：此处 `mul ecx`（magic `0xCCCCCCCD`）+ `shr edx,5` = **/40**（不是 /8 也不是 /40→/… ）
+    // 值域 [0,200] ⇒ +0..+5 ⇒ tile 322..327，真机实测这 6 档各约 270~280 格。
     cell.tile = theater.waterSet + 8 + ((v / 40) | 0);
   }
 }
@@ -837,9 +900,12 @@ function orth(ctx: WaterContext, x: number, y: number, d: number): NativeCell | 
 }
 
 /**
- * `Place_Tile_Block 0x005A6C10`。模板逐格：subtile = j·w+i、tile = 模板基址、
+ * `Place_Tile_Block 0x005A6C10`。模板逐格：subtile = j·w+i、**tile = templateIndex（tile 号本身）**、
  * slope = 模板子格 slope；levelDelta ≠ -1 时 level = Δ + 模板子格 level − 4。
  * tag 写入 scratch+0x38。越界格跳过但**哨兵格可被写入**（共享态）。
+ *
+ * ⚠ 写入的是 **tile 号**，不是所属 tileset 的基址（见上方
+ * `tileSetIndexOfTile` 处的真机实证说明）。`tileSetIndexOfTile` 仍用于取模板元数据。
  */
 export function placeTileBlock(
   ctx: WaterContext,
@@ -851,8 +917,7 @@ export function placeTileBlock(
 ): void {
   const { cells, scratch, theater } = ctx;
   const ti = tileSetIndexOfTile(theater, templateIndex);
-  const ts = theater.tileSets[ti];
-  if (ts === undefined) return;
+  if (theater.tileSets[ti] === undefined) return;
   const w = templateWidth(theater, templateIndex);
   const h = templateHeight(theater, templateIndex);
   for (let j = 0; j < h; j++) {
@@ -863,7 +928,7 @@ export function placeTileBlock(
       if (!cells.inDiamondBounds(cx, cy)) continue;
       const cell = cells.cellAt(cx, cy);
       cell.subTile = sub;
-      cell.tile = ts.base;
+      cell.tile = templateIndex;
       if (levelDelta !== -1) {
         cell.level = (levelDelta + templateSubLevel(theater, templateIndex, sub) - 4) & 0xff;
       }
@@ -873,8 +938,32 @@ export function placeTileBlock(
   }
 }
 
-// 模板元数据：模板实参是 **tile 序号**（IsoTileType per-tile 对象）。
-// 写入的 tile 值 = 该 tile 所属 tileset 的基址（模板 +660 字段语义）。
+// 模板元数据：模板实参是 **tile 号**（`IsoTileType` per-tile 对象）。
+//
+// 🔴 **2026-10-08 修正（真机 RandMap4/5/6 实证）**
+// 旧注释断言「写入的 tile 值 = 该 tile 所属 tileset 的基址」，据此 `placeTileBlock`
+// 与 `shoreStampTile` 都写 `ts.base`。**这是错的**，原生 `0x57B440`（size=0x350）盖章处是：
+// ```c
+// LABEL_32:
+//   v14[14] = *(_DWORD *)(v29 + 660);          // ← 写「模板对象 +660」
+//   *((_BYTE*)v14 + 282) = v15;                 // subtile
+//   *((_BYTE*)v14 + 283) = a3 + *(_BYTE*)(v16 + 40);  // level = levelBase + tmpl.subHeight
+// ```
+// `v29 = dword_880990` 就是**被选中的那个 IsoTileType 模板对象**，`+660` 字段
+// 存的是它自己的 **tile 号**（不是 tileset 基址）。同一个字段在兼容性判定里也被
+// 当 tile 号用：`v24 = *(_DWORD *)(v29 + 660) - dword_ABAD28`，直接去减
+// `ShorePieces` 基址 —— 只有「tile 号」才减得通，tileset 基址恒等于 ABAD28，
+// 该减法恒为 0。
+//
+// 真机基线双向验证（`re/tile_hist.js`）：
+//   原生公式 tile = ShorePieces + v12 − 1，v12 ∈ [1,41] ⇒ 值域 **89..129**
+//   RandMap4 观测 shore tile **89..128**（38 种）、RandMap6 **89..128**（40 种）
+//   旧口径（tileset 基址）⇒ 恒 **89**（1 种）—— 与真机完全不符
+//   同理 ramp：原生 slope+29−1 ⇒ 29..47，真机观测 29..46
+//
+// ⇒ `templateIndex`（= tile 号）可直接写入 `cell.tile`；`tileSetIndexOfTile`
+//   仍用于查 `ts` 模板元数据，但**不再决定写入值**。
+//
 // w/h 来自 .TMP 资产（TileSetClass+740/744）—— 平水假设：水族大块 2×2、
 // 其余 1×1。UNVERIFIED —— 待 oracle 抓取真机值后替换（README「未认证」）。
 function tileSetIndexOfTile(t: TheaterTables, tile: number): number {
@@ -954,6 +1043,12 @@ export function shoreFinalize(ctx: WaterContext, tag: number, mode: number): num
   // 原生 0x57A0C0 入口：全部暂存 +0x40（掩码缓存）清 -1 —— 每次调用都清，
   // 否则 blob 阶段的陈旧掩码会污染后续岸线判定（内陆盖岸线片的根因）
   for (const slot of scratch.slots) slot.shoreMask = -1;
+  // 原生每次调用都重建 tag 堆（operator new + 58BDC0 ⇒ tag 全 0）
+  if (ctx.shoreTags === undefined || ctx.shoreTags.length !== scratch.slots.length) {
+    ctx.shoreTags = new Int32Array(scratch.slots.length);
+  } else {
+    ctx.shoreTags.fill(0);
+  }
   let j = 1;
   for (const cell of cells.iterate()) {
     if (j === 0) break;
@@ -1023,13 +1118,15 @@ function shorePass1(
     if ((m1 & 8) !== 0 || (m2 & 8) !== 0) need = true;
   }
   if ((maskU & 0x88) === 0x88 || (maskU & 0x22) === 0x22 || need) {
-    const cur = scratch.at(xd, yd);
-    if (cur.regionId > 0 && cur.regionId !== tag && mode === 0) return 0;
+    // 原生 `v33 = sub_5A00C0(&i)` 读的是**独立 tag 堆**（+56），不是 scratch.regionId
+    const ti2 = shoreTagIndex(ctx, xd, yd);
+    const curTag = ctx.shoreTags !== undefined ? ctx.shoreTags[ti2] : 0;
+    if (curTag > 0 && curTag !== tag && mode === 0) return 0;
     const cell = cells.slotAt(xd, yd);
     if (cell === null) return 1;
     cell.subTile = 0;
     cell.tile = theater.waterSet;
-    cur.regionId = mode !== 0 ? 0 : tag;
+    if (ctx.shoreTags !== undefined) ctx.shoreTags[ti2] = mode !== 0 ? 0 : tag;
     for (let d = 0; d < 8; d++) {
       const off = DIRECTION_OFFSETS[d];
       const nx = xd + off[0];
@@ -1317,8 +1414,7 @@ function shoreStampTile(
 ): boolean {
   const { cells, scratch, theater } = ctx;
   const ti = tileSetIndexOfTile(theater, templateIndex);
-  const ts = theater.tileSets[ti];
-  if (ts === undefined) return false;
+  if (theater.tileSets[ti] === undefined) return false;
   const w = templateWidth(theater, templateIndex);
   const h = templateHeight(theater, templateIndex);
   // 原生入口：mode != 0 时 tag 直接清零
@@ -1331,12 +1427,17 @@ function shoreStampTile(
       if (!cells.inDiamondBounds(cx, cy)) continue;
       const cell = cells.cellAt(cx, cy);
       const slot = scratch.at(cx, cy);
-      const curTag = mode !== 0 ? 0 : slot.regionId;
+      // 原生 `v17 = sub_5A00C0(&v31)` 读的是**独立 tag 堆**，不是 scratch.regionId
+      const ti2 = shoreTagIndex(ctx, cx, cy);
+      const curTag = mode !== 0 ? 0 : ctx.shoreTags !== undefined ? ctx.shoreTags[ti2] : 0;
 
+      // ⚠ `ts.base` → `templateIndex`：原生 `*(DWORD*)(v29+660)` 就是 tile 号。
+      //   兼容性判定两侧（`v14[14]` / `v29+660`）都直接减 shorePieces 基址，
+      //   只有 tile 号语义才自洽（见 tileSetIndexOfTile 上方实证）。
       if (curTag === claim) {
         // LABEL_20：82A89C 差值 ∈ [3,5] → 冲突
         const a = cell.tile - theater.shorePieces;
-        const b = ts.base - theater.shorePieces;
+        const b = templateIndex - theater.shorePieces;
         if (a >= 0 && b >= 0 && a <= 41 && b <= 41) {
           const diff = Math.abs(SHORE_COMPAT_B[a] - SHORE_COMPAT_B[b]);
           if (diff >= 3 && diff <= 5) return false;
@@ -1344,7 +1445,7 @@ function shoreStampTile(
       } else if (claim !== -1) {
         if (!isClearTile(cell)) {
           const a = cell.tile - theater.shorePieces;
-          const b = ts.base - theater.shorePieces;
+          const b = templateIndex - theater.shorePieces;
           if (
             a < 0 ||
             b < 0 ||
@@ -1356,16 +1457,16 @@ function shoreStampTile(
           }
           return true; // 兼容：整体放行（原生 return 1）
         }
-        slot.regionId = claim;
+        if (ctx.shoreTags !== undefined) ctx.shoreTags[ti2] = claim;
       } else {
         // tag == -1 且他 tag 占用
         if (!isClearTile(cell)) continue; // LABEL_36
-        slot.regionId = claim;
+        if (ctx.shoreTags !== undefined) ctx.shoreTags[ti2] = claim;
       }
 
       // LABEL_32
       if (isClearTile(cell) || (cell.tile >= range[0] && cell.tile <= range[1])) {
-        cell.tile = ts.base;
+        cell.tile = templateIndex;
         cell.subTile = sub;
         cell.level = (levelBase + templateSubLevel(theater, templateIndex, sub)) & 0xff;
         continue; // LABEL_36
@@ -1373,9 +1474,9 @@ function shoreStampTile(
       // 非可覆盖格：兼容命中 → *a5 = 0（中止）；未命中 → *a5 保持 1（跳过）
       if (
         (isShorePieceTile(cell, theater) &&
-          shoreSubCompatCheck(theater, ts.base, sub)) ||
-        (ts.base >= theater.shorePieces &&
-          ts.base < theater.shorePieces + 42 &&
+          shoreSubCompatCheck(theater, templateIndex, sub)) ||
+        (templateIndex >= theater.shorePieces &&
+          templateIndex < theater.shorePieces + 42 &&
           shoreFamilyD0(cell, theater))
       ) {
         return false;

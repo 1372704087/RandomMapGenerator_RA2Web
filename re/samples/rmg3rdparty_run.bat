@@ -1,0 +1,1 @@
+start ./RandomMapGenerator.exe -w 200 -h 200 --nwp 2 --sep 2 --nep 2 --swp 2 -d --type DESERT -g standard

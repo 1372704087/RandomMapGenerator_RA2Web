@@ -1,0 +1,55 @@
+{
+  "source": "unicorn 2.1.4 / gamemd.exe (YR 1.001)",
+  "fpcw": "0xe7f",
+  "dir_word_table": {
+    "dir_word_disk": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "after_clear": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "after_fill_dword_fn": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "dir_dword_after_fill": [
+      4294901760,
+      4294901761,
+      1,
+      65537,
+      65536,
+      131071,
+      65535,
+      4294967295
+    ],
+    "conclusion": "0x49F2F0 只写 dword_89F688（8×4B），不触碰 0x89F6B8；全 .text 对 0x89F6B8 仅 1 处引用且是清零 ⇒ 该表恒为全 0"
+  },
+  "landtype_base": {
+    "lt_a_refs": [
+      4733352
+    ],
+    "lt_b_refs": [],
+    "body_size": 288,
+    "conclusion": "0x4838E0 内 LT_A(0x0089EA60) 引用 1 处, LT_B(0x0089EA90) 引用 0 处"
+  }
+}
