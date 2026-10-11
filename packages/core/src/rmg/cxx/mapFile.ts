@@ -250,7 +250,7 @@ function lzo1xDoCompress(
  * inLen + inLen / 16 + 64 + 3 bytes; the result always ends in the LZO1X end
  * marker 0x11 0x00 0x00.
  */
-function lzo1xCompress(inp: Uint8Array, inLen: number, out: Uint8Array): number {
+export function lzo1xCompress(inp: Uint8Array, inLen: number, out: Uint8Array): number {
     const dict = new Int32Array(LZO_D_SIZE).fill(-1);
 
     let op = 0;

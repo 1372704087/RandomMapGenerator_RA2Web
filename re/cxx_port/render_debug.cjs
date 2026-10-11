@@ -148,7 +148,7 @@ if (process.env.ATTR === '1') {
     }
     const pngName = process.env.ATTR_PNG || '05dbg';
     const img = decodePng('.tmp_oracle/batch20/' + pngName + '.png');
-    const zbn = fs.readFileSync('.tmp_oracle/batch20/05_zbuf.npy');
+    const zbn = fs.readFileSync('.tmp_oracle/batch20/' + pngName + '_zbuf.npy');
     const zhdrLen = zbn.readUInt16LE(8);
     const zdata = zbn.subarray(10 + zhdrLen);
     const bb = (process.env.ATTR_BBOX || '1950,264,2726,418').split(',').map(Number);
