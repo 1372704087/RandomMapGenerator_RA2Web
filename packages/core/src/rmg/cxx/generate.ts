@@ -12,6 +12,7 @@ import { diag } from './diag';
 import { LandType, MapGenConfig } from './types';
 import { decorateWaterTiles } from './river';
 import { initRegions, makeRegions } from './making';
+import { smoothPartialSteps } from './stepSmooth';
 import { recalculateCellAttributes } from './recalc';
 import { createStartingPoints } from './startpoint';
 import { addTechBuildings } from './tech';
@@ -166,6 +167,12 @@ export function generateMap(
     dumpStage('recalc4');
     if (stopAfter('recalc4')) return finishEarly('recalc4');
 
+    // [QUALITY-FIX] 消除 2~3 级可见落差（RA2 无对应立面件，渲染黑洞的唯一成因；
+    // 原版 exe 同病，此 pass 使 TS 严格优于原版）。仅内陆/山地启用。
+    if (cfg.landType === LandType.Inland || cfg.landType === LandType.Mountainous)
+        smoothPartialSteps(rmg);
+    scanMaxLevel('after-step-smooth');
+
     pruneTerrainTrees(rmg); // [port-only]
     cleanupStage(rmg); // 0x5993A5
     scanMaxLevel('after-cleanup');
@@ -173,6 +180,29 @@ export function generateMap(
     computeRadarImage(rmg); // 0x599451
     doneStage(rmg); // 0x59947E
     scanMaxLevel('after-done');
+
+    if (process.env.RMG_DEBUG_STAMP && (cfg.landType === LandType.Inland || cfg.landType === LandType.Mountainous)) {
+        // [QUALITY-FIX 探针] 收尾复扫：统计残余 2~3 级可见面（屏幕下方两个方向）
+        let p2 = 0, p3 = 0;
+        const side = rmg.size.workSide;
+        const samples: string[] = [];
+        for (let y = 0; y < side; ++y) {
+            for (let x = 0; x < side; ++x) {
+                if (!rmg.cellExists(x, y)) continue;
+                const lvl = rmg.cellAt(x, y).level;
+                for (const [dx, dy] of [[1, 0], [0, 1]] as Array<[number, number]>) {
+                    if (!rmg.cellExists(x + dx, y + dy)) continue;
+                    const d = lvl - rmg.cellAt(x + dx, y + dy).level;
+                    if (d === 2 || d === 3) {
+                        if (d === 2) ++p2; else ++p3;
+                        if (samples.length < 8)
+                            samples.push(`(${x},${y})z${lvl}->(${x + dx},${y + dy})z${lvl - d}`);
+                    }
+                }
+            }
+        }
+        diag(`STEP-SMOOTH-RESIDUAL visible d2=${p2} d3=${p3} ${samples.join(' ')}`);
+    }
 
     let mapPath: string | undefined;
     if (outPath !== null) {
