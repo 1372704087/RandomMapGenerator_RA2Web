@@ -153,10 +153,17 @@ for (let i = 0; i < JOBS.length; ++i) {
   const png = path.join(OUT, name + '.png');
   const small = downscale(decodePng(fs.readFileSync(png)), 880);
   fs.writeFileSync(path.join(OUT, name + '.small.png'), encodePng(small.w, small.h, small.rgb));
-  fs.rmSync(png); // 全分辨率图丢弃，只留缩图
+  // 内联黑簇扫描后删除全分辨率图
+  let scanLargest = '0';
+  try {
+    const scanOut = execFileSync(process.execPath, [path.join(__dirname, 'blackscan.cjs'), name], { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    const m = scanOut.match(/largest 5: ([0-9]+)px/);
+    if (m) scanLargest = m[1] + 'px';
+  } catch (e) { scanLargest = 'scan失败'; }
+  fs.rmSync(png);
   const meta = JSON.parse(fs.readFileSync(path.join(OUT, name + '.json'), 'utf8'));
-  results.push({ name, seed: j.seed, meta });
-  console.log(`[${i + 1}/20] ${name} ok  starts=${(meta.startPositions || []).length}`);
+  results.push({ name, seed: j.seed, scanLargest, meta });
+  console.log(`[${i + 1}/20] ${name} ok  starts=${(meta.startPositions || []).length} 最大黑簇=${scanLargest}`);
 }
 fs.writeFileSync(path.join(OUT, 'batch_results.json'), JSON.stringify(results, null, 1));
 console.log('done');
