@@ -52,6 +52,7 @@ export interface GenerateResult {
     waterAmount: number;
     cellCount: number;
     mapPath?: string;
+    stoppedAt?: string;
 }
 
 /**
@@ -111,34 +112,64 @@ export function generateMap(
     };
 
     decorateWaterTiles(rmg); // sub_59C630, every land type
+    // [DEBUG] 阶段隔离: RMG_DUMP_STAGES=1 每阶段落盘一份 .map; RMG_STOP_AFTER=<阶段> 到该阶段为止
+    // 阶段名: water regions recalc1 startpoints tiberium recalc3 hills lats recalc4 cleanup done
+    const dumpStage = (name: string): void => {
+        if (process.env.RMG_DUMP_STAGES !== '1' && process.env.RMG_STOP_AFTER !== name) return;
+        if (outPath === null) return;
+        saveMapFile(rmg, outPath.replace(/.map$/, '.' + name + '.map'));
+    };
+    const stopAfter = (name: string): boolean => process.env.RMG_STOP_AFTER === name;
+    const finishEarly = (name: string): { rmg: Rmg; result: GenerateResult } => {
+        let mapPath: string | undefined;
+        if (outPath !== null && saveMapFile(rmg, outPath)) mapPath = outPath;
+        return { rmg, result: { ok: true, waterAmount: rmg.waterAmount, cellCount: rmg.cellCount, mapPath, stoppedAt: name } };
+    };
     scanMaxLevel('after-water');
 
     initRegions(rmg); // 0x598C24
     makeRegions(rmg); // 0x598D44 (3/4 chain + green fill)
     scanMaxLevel('after-regions');
+    dumpStage('regions');
+    if (stopAfter('regions')) return finishEarly('regions');
 
     recalculateCellAttributes(rmg); // 0x598E1F
     scanMaxLevel('after-recalc1');
+    dumpStage('recalc1');
+    if (stopAfter('recalc1')) return finishEarly('recalc1');
 
     createStartingPoints(rmg); // 0x598E9E (retry loop)
     scanMaxLevel('after-startpoints');
+    dumpStage('startpoints');
+    if (stopAfter('startpoints')) return finishEarly('startpoints');
     addTechBuildings(rmg); // 0x598EBF
     addTiberium(rmg); // 0x598EE5 + region teardown
     scanMaxLevel('after-tiberium');
+    dumpStage('tiberium');
+    if (stopAfter('tiberium')) return finishEarly('tiberium');
     recalculateCellAttributes(rmg); // 0x598FB8
     recalculateCellAttributes(rmg); // 0x59912A
     scanMaxLevel('after-recalc3');
+    dumpStage('recalc3');
+    if (stopAfter('recalc3')) return finishEarly('recalc3');
 
     createHills(rmg); // 0x599171
     scanMaxLevel('after-hills');
+    dumpStage('hills');
+    if (stopAfter('hills')) return finishEarly('hills');
     createLats(rmg); // 0x599215
     scanMaxLevel('after-lats');
+    dumpStage('lats');
+    if (stopAfter('lats')) return finishEarly('lats');
     recalculateCellAttributes(rmg); // 0x599354
     scanMaxLevel('after-recalc4');
+    dumpStage('recalc4');
+    if (stopAfter('recalc4')) return finishEarly('recalc4');
 
     pruneTerrainTrees(rmg); // [port-only]
     cleanupStage(rmg); // 0x5993A5
     scanMaxLevel('after-cleanup');
+    dumpStage('cleanup');
     computeRadarImage(rmg); // 0x599451
     doneStage(rmg); // 0x59947E
     scanMaxLevel('after-done');
