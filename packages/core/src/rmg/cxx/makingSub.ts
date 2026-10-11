@@ -699,6 +699,44 @@ export function splitOrDropRegion(r: Rmg, region: MapRegion | null): boolean {
 // sub_58EF10 - Making-regions step 2: rebuild the region set from the work
 // marks, then link the regions and carve the ramps between them.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// [QUALITY-FIX] LegalizeLevelBoundaries - 有界扫掠式可见落差合法化。
+// RA2 地形语言只有两种自覆盖立面: 1 级(邻格菱形重叠)与 4 级(Cliff Set 立面件);
+// 2~3 级与 5+ 级的可见落差无任何覆盖件, 渲染为未写入表面(黑色楼梯)。
+// 原版生成器同样产生此缺陷(坏种子下 exe 渲染同样黑, rmg_20261011_002011 实证),
+// 本 pass 是质量增强而非对齐: 在区域层值定型之后、坡道雕刻之前运行, 把可见方向
+// (屏幕下方两邻)的非法落差归一, 使后续坡道/悬崖阶段在合法边界上铺件。
+// ---------------------------------------------------------------------------
+export function legalizeLevelBoundaries(r: Rmg): void {
+    if (r.work.count === 0 || r.cellSlots.length === 0) return;
+
+    for (let sweep = 0; sweep < 12; ++sweep) {
+        let fixed = 0;
+        for (let y = 0; y < r.size.workSide; ++y) {
+            for (let x = 0; x < r.size.workSide; ++x) {
+                if (!r.cellExists(i16(x), i16(y))) continue;
+                const c = r.cellAt(i16(x), i16(y));
+                for (const [dx, dy] of [[1, 0], [0, 1]] as Array<[number, number]>) {
+                    if (!r.cellExists(i16(x + dx), i16(y + dy))) continue;
+                    const n = r.cellAt(i16(x + dx), i16(y + dy));
+                    const hi = c.level >= n.level ? c : n;
+                    const lo = c.level >= n.level ? n : c;
+                    const d = hi.level - lo.level;
+                    if (d === 2 || d === 3) {
+                        lo.level = Math.min(10, hi.level - 1);
+                        ++fixed;
+                    } else if (d >= 5) {
+                        lo.level = Math.min(10, hi.level - 4);
+                        ++fixed;
+                    }
+                }
+            }
+        }
+        if (fixed > 0) diag('LEGALIZE sweep' + sweep + ' fixed=' + fixed);
+        if (fixed === 0) break;
+    }
+}
+
 export function reseedRegions(r: Rmg): void {
     if (r.work.count === 0 || r.cellSlots.length === 0)
         return;
@@ -740,6 +778,9 @@ export function reseedRegions(r: Rmg): void {
     // the shared helper with flag 0 produces the identical sweep order and
     // stamped value.
     assignRemainingCells(r, 0);                           // 0x58efcb - 0x58f02b
+
+    // [QUALITY-FIX] 层值已定型、坡道未雕刻 —— 合法化可见落差的唯一正确时机
+    legalizeLevelBoundaries(r);
 
     // ---- 5. Adjacency and ramps (0x58f033 - 0x58f0aa) ---------------------
     if (pass) {                                           // 0x58f038
