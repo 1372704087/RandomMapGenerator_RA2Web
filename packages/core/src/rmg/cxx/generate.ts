@@ -17,7 +17,6 @@ import { createStartingPoints } from './startpoint';
 import { addTechBuildings } from './tech';
 import { addTiberium } from './tiberium';
 import { createHills } from './hills';
-import { settleBareRims } from './makingSub';
 import { createLats, pruneTerrainTrees } from './lat';
 import { cleanupStage, computeRadarImage, doneStage, saveMapFile } from './mapFile';
 
