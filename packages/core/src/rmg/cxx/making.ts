@@ -32,11 +32,14 @@ import {
     unpYS,
     i16,
 } from './types';
+import { diag } from './diag';
 import { F2I64, K_UNIT_SCALE } from './mathTables';
 import {
     // MapGenMaking.cpp stage calls (MapGenMakingSub.cpp)
     rebuildRegionBodies,
     reseedRegions,
+    legalizeRegionLevels,
+    legalizeLevelBoundaries,
     fixCliffLevels,
     placeCliffs,
     correctCliffTiles,
@@ -105,15 +108,44 @@ export function initRegions(r: Rmg): void {
 // tail between the gate and the last call is not ported (MapGenMaking.cpp
 // header).
 // ---------------------------------------------------------------------------
+
+function violDiag(r: Rmg, tag: string): void {
+    if (!process.env.RMG_VIOLATION_DIAG) return;
+    const side = r.size.workSide;
+    const pairHist = new Map<string, number>();
+    let total = 0;
+    for (let y = 0; y < side; ++y) {
+        for (let x = 0; x < side; ++x) {
+            if (!r.cellExists(i16(x), i16(y))) continue;
+            const c = r.cellAt(i16(x), i16(y));
+            for (const [dx, dy] of [[1, 0], [0, 1]] as Array<[number, number]>) {
+                if (!r.cellExists(i16(x + dx), i16(y + dy))) continue;
+                const n = r.cellAt(i16(x + dx), i16(y + dy));
+                const d = c.level - n.level;
+                if (d === 2 || d === 3 || d >= 5) {
+                    ++total;
+                    const k = c.level + '>' + n.level;
+                    pairHist.set(k, (pairHist.get(k) || 0) + 1);
+                }
+            }
+        }
+    }
+    const top = [...pairHist].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, v]) => k + ':' + v).join(' ');
+    diag('VIOLATION-DIAG ' + tag + ' total=' + total + ' [' + top + ']');
+}
+
 export function makeRegions(r: Rmg): void {
     // ---- 0x598d55 - 0x598d60: the LandType 3/4 gate ----------------------
     const landType = r.config.landType;
 
     if (landType === 3 || landType === 4) {
         if (process.env['TS_EXTRA_DRAW'] === 'beforefix') r.rng.next(); // TEMP PROBE
-        rebuildRegionBodies(r);                      // 0x598d62  sub_58EBC0
-        reseedRegions(r);                            // 0x598d67  sub_58EF10
-        fixCliffLevels(r);                           // 0x598d6e  sub_5A19E0
+        rebuildRegionBodies(r);
+        violDiag(r, '1-after-split');                      // 0x598d62  sub_58EBC0
+        reseedRegions(r);
+        violDiag(r, '2-after-reseed');                            // 0x598d67  sub_58EF10
+        fixCliffLevels(r);
+        violDiag(r, '3-after-fixcliff');                           // 0x598d6e  sub_5A19E0
         if (process.env['TS_EXTRA_DRAW'] === 'beforecliffs') r.rng.next(); // TEMP PROBE
         if (process.env['TS_EXTRA_K']) { const k = parseInt(process.env['TS_EXTRA_K']!) | 0; for (let q = 0; q < k; ++q) r.rng.next(); } // TEMP PROBE
         if (process.env['TS_REWIND'] === '1') { // TEMP PROBE: undo one draw
@@ -126,7 +158,8 @@ export function makeRegions(r: Rmg): void {
         }
         placeCliffs(r);                              // 0x598d7b  sub_578E60
         correctCliffTiles(r);                        // 0x598d82  sub_5A17F0
-        repairCliffPieces(r);                        // port-only swallowed-piece repair
+        repairCliffPieces(r);
+        violDiag(r, '4-after-cliffs');                        // port-only swallowed-piece repair
     }
 
     // ---- 0x598e1a: runs for every land type ------------------------------

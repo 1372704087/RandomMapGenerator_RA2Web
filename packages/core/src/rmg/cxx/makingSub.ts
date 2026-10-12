@@ -737,6 +737,98 @@ export function legalizeLevelBoundaries(r: Rmg): void {
     }
 }
 
+// ---------------------------------------------------------------------------
+// [QUALITY-FIX] LegalizeRegionLevels - 区域粒度的层差合法化（源头修复）。
+// 黑楼梯的根源: split/merge 给区域分配的层值使相邻区域层差出现 2~3/5+(RA2
+// 地形语言只有 1 级重叠与 4 级 Cliff Set 两种自覆盖立面)。本 pass 在 split
+// 定型之后、reseed/坡道之前, 沿区域邻接图把非法层差归一: 始终抬高较低一侧
+// (d→1), 单调有界必然收敛。区域整块平移, 不产生区域内部碎裂。
+// ---------------------------------------------------------------------------
+export function legalizeRegionLevels(r: Rmg): void {
+    if (r.work.count === 0 || r.cellSlots.length === 0 || r.regions.length === 0) return;
+
+    const side = r.size.workSide;
+    // 1. 邻接收集(陆-陆)
+    const adj = new Map<number, Set<number>>();
+    const waterAdj = new Map<number, number>();
+    for (let y = 0; y < side; ++y) {
+        for (let x = 0; x < side; ++x) {
+            if (!r.cellExists(i16(x), i16(y))) continue;
+            const a = r.work.i(r.workIndex(x, y), 14);
+            if (a < 0) continue;
+            for (const [dx, dy] of [[1, 0], [0, 1]] as Array<[number, number]>) {
+                if (!r.cellExists(i16(x + dx), i16(y + dy))) continue;
+                const b = r.work.i(r.workIndex(x + dx, y + dy), 14);
+                if (b < 0 || b === a) continue;
+                if (!adj.has(a)) adj.set(a, new Set());
+                if (!adj.has(b)) adj.set(b, new Set());
+                adj.get(a)!.add(b);
+                adj.get(b)!.add(a);
+            }
+            // 记录陆区相邻水面(水位约束用)
+            for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1]] as Array<[number, number]>) {
+                if (!r.cellExists(i16(x + dx), i16(y + dy))) continue;
+                const b2 = r.work.i(r.workIndex(x + dx, y + dy), 14);
+                if (b2 < 0 || b2 === a) continue;
+                const nb2 = r.regions.find((rr) => rr !== undefined && rr !== null && rr.id === b2);
+                if (nb2 === undefined || nb2 === null || !nb2.waterFamily) continue;
+                const cur = waterAdj.get(a);
+                if (cur === undefined || nb2.level > cur) waterAdj.set(a, nb2.level);
+            }
+        }
+    }
+
+    // 抬升受水位约束: 与相邻水面的落差不得超过 4
+    const capByWater = (region: MapRegion, delta: number): number => {
+        const w = waterAdj.get(region.id);
+        if (w === undefined || delta <= 0) return delta;
+        const maxDelta = w + 1 - region.level;
+        return Math.min(delta, maxDelta);
+    };
+    const shiftRegion = (region: MapRegion, delta: number): void => {
+        region.level += delta;
+        for (let y = 0; y < side; ++y) {
+            for (let x = 0; x < side; ++x) {
+                if (!r.cellExists(i16(x), i16(y))) continue;
+                if (r.work.i(r.workIndex(x, y), 14) !== region.id) continue;
+                const cell = r.cellAt(i16(x), i16(y));
+                cell.level = Math.min(10, cell.level + delta);
+            }
+        }
+    };
+
+    diag('REGION-LEGALIZE adj-pairs=' + adj.size + ' regions=' + r.regions.length);
+    // 2. 迭代修正: 每对非法层差抬高较低区域 (d→1); 抬到 10 仍非法则降较高侧
+    for (let iter = 0; iter < 24; ++iter) {
+        let fixed = 0;
+        for (const region of r.regions) {
+            if (region === undefined || region === null || region.waterFamily) continue;
+            const nbs = adj.get(region.id);
+            if (nbs === undefined) continue;
+            for (const nbId of nbs) {
+                const nb = findRegionById(r, nbId);
+                if (nb === null || nb.waterFamily) continue;
+                const d = region.level - nb.level;
+                if (d >= 2 && d <= 3) {
+                    if (nb.level + (d - 1) <= 10) { const dd = capByWater(nb, d - 1); if (dd > 0) { shiftRegion(nb, dd); ++fixed; } }
+                    else if (region.level - (d - 1) >= 1) { shiftRegion(region, -(d - 1)); ++fixed; }
+                } else if (d >= 5) {
+                    if (nb.level + (d - 4) <= 10) { const dd = capByWater(nb, d - 4); if (dd > 0) { shiftRegion(nb, dd); ++fixed; } }
+                    else if (region.level - (d - 4) >= 1) { shiftRegion(region, -(d - 4)); ++fixed; }
+                } else if (d <= -2 && d >= -3) {
+                    if (region.level + (-d - 1) <= 10) { const dd = capByWater(region, -d - 1); if (dd > 0) { shiftRegion(region, dd); ++fixed; } }
+                    else if (nb.level - (-d - 1) >= 1) { shiftRegion(nb, -(-d - 1)); ++fixed; }
+                } else if (d <= -5) {
+                    if (region.level + (-d - 4) <= 10) { const dd = capByWater(region, -d - 4); if (dd > 0) { shiftRegion(region, dd); ++fixed; } }
+                    else if (nb.level - (-d - 4) >= 1) { shiftRegion(nb, -(-d - 4)); ++fixed; }
+                }
+            }
+        }
+        diag('REGION-LEGALIZE iter' + iter + ' fixed=' + fixed);
+        if (fixed === 0) break;
+    }
+}
+
 export function reseedRegions(r: Rmg): void {
     if (r.work.count === 0 || r.cellSlots.length === 0)
         return;
@@ -780,6 +872,8 @@ export function reseedRegions(r: Rmg): void {
     assignRemainingCells(r, 0);                           // 0x58efcb - 0x58f02b
 
     // [QUALITY-FIX] 层值已定型、坡道未雕刻 —— 合法化可见落差的唯一正确时机
+    // [QUALITY-FIX] 区域粒度合法化(源头): 此刻标记已有效、坡道未雕刻
+    legalizeRegionLevels(r);
     legalizeLevelBoundaries(r);
 
     // ---- 5. Adjacency and ramps (0x58f033 - 0x58f0aa) ---------------------
