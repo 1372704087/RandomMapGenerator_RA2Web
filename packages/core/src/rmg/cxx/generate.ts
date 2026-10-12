@@ -17,6 +17,7 @@ import { createStartingPoints } from './startpoint';
 import { addTechBuildings } from './tech';
 import { addTiberium } from './tiberium';
 import { createHills } from './hills';
+import { settleBareRims } from './makingSub';
 import { createLats, pruneTerrainTrees } from './lat';
 import { cleanupStage, computeRadarImage, doneStage, saveMapFile } from './mapFile';
 
@@ -135,6 +136,7 @@ export function generateMap(
     scanMaxLevel('after-lats');
     recalculateCellAttributes(rmg); // 0x599354
     scanMaxLevel('after-recalc4');
+
 
     // [QUALITY-FIX] 消除 2~3 级可见落差（RA2 无对应立面件，渲染黑洞的唯一成因；
     // 原版 exe 同病，此 pass 使 TS 严格优于原版）。仅内陆/山地启用。
