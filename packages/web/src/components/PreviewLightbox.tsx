@@ -56,12 +56,12 @@ export default function PreviewLightbox({
         </div>
         <canvas
           ref={ref}
+          className="transparent-preview"
           style={{
             width: Math.round(preview.width * scale),
             height: Math.round(preview.height * scale),
             imageRendering: 'pixelated',
             display: 'block',
-            background: '#000',
           }}
         />
       </div>

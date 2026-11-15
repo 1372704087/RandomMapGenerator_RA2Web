@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
-import { fetchMapPreviews, type MapPreviewData } from '../api';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { fetchMapPreviews, fetchCncmapsPreview, type MapPreviewData } from '../api';
 import MapPreviewCanvas from '../components/MapPreviewCanvas';
 import PreviewLightbox from '../components/PreviewLightbox';
+import ImageLightbox from '../components/ImageLightbox';
 
 // ============== 类型定义 ==============
 type Direction = 'N' | 'S' | 'W' | 'E' | 'NE' | 'SE' | 'NW' | 'SW';
@@ -20,6 +21,8 @@ type GenerateRequest = {
   /** 后端接受 boolean，也接受具体的损坏参数（见 server/src/types.ts DamagedBuildingOptions） */
   damagedBuilding: boolean | { min: number; max: number; destroyP: number };
   smudge: number;
+  /** VERA20k 适配：30 人 + 大图（width+height ≤ 1024） */
+  vera20k: boolean;
 };
 
 type Status =
@@ -66,6 +69,10 @@ const WIDTH_MIN = 90;
 const WIDTH_MAX = 200;
 const HEIGHT_MIN = 90;
 const HEIGHT_MAX = 200;
+/** VERA20k: [Map] Size 硬限 width+height ≤ 1024，最大正方形 512×512。 */
+const VERA_MAX_SIDE = 512;
+const VERA_MAX_SPAN = 1024;
+const VERA_MAX_TOTAL_PLAYERS = 30;
 const SMUDGE_MIN = 0;
 const SMUDGE_MAX = 0.1;
 const SMUDGE_STEP = 0.01;
@@ -73,6 +80,9 @@ const PLAYERS_MIN = 0;
 const PLAYERS_MAX = 8;
 const MAX_PLAYERS_PER_DIR = 8;
 const MAX_TOTAL_PLAYERS = 8;
+/** N/S/W/E 的 PlacePlayerLocation 写死了 4 个偏移，VERA 模式下按 4 校验。 */
+const CARDINAL_DIRECTIONS: Direction[] = ['N', 'S', 'W', 'E'];
+const MAX_CARDINAL_PLAYERS = 4;
 
 const EMPTY_PLAYERS: Players = {
   N: 0, S: 0, W: 0, E: 0, NE: 0, SE: 0, NW: 0, SW: 0
@@ -118,9 +128,10 @@ export default function GeneratePage() {
   const [height, setHeight] = useState(150);
   const [mapName, setMapName] = useState('Random Map');
   const [gamemode, setGamemode] = useState('standard');
-  const [totalPlayers, setTotalPlayers] = useState(0); // 0 = random
+  const [totalPlayers, setTotalPlayers] = useState(0); // 0 = 使用下方方向计数（全 0 则随机）
   const [totalRandom, setTotalRandom] = useState(false);
   const [players, setPlayers] = useState<Players>(EMPTY_PLAYERS);
+  const [vera20k, setVera20k] = useState(false);
   const [damageEnabled, setDamageEnabled] = useState(false);
   const [damageMin, setDamageMin] = useState(10);
   const [damageMax, setDamageMax] = useState(50);
@@ -133,6 +144,17 @@ export default function GeneratePage() {
   const [genPreview, setGenPreview] = useState<MapPreviewData | null>(null);
   /** 大图查看器（灯箱） */
   const [lightbox, setLightbox] = useState<{ preview: MapPreviewData; title: string } | null>(null);
+  /** cncmaps 渲染预览 */
+  const [cncmapsStatus, setCncmapsStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [cncmapsError, setCncmapsError] = useState<string | null>(null);
+  const [cncmapsPreviewUrl, setCncmapsPreviewUrl] = useState<string | null>(null);
+  const [cncmapsLightbox, setCncmapsLightbox] = useState(false);
+  const cncmapsUrlRef = useRef<string | null>(null);
+  const cncmapsSeq = useRef(0);
+
+  useEffect(() => () => {
+    if (cncmapsUrlRef.current) URL.revokeObjectURL(cncmapsUrlRef.current);
+  }, []);
 
   // 加载 theater 列表
   useEffect(() => {
@@ -167,7 +189,20 @@ export default function GeneratePage() {
     [players]
   );
 
-  const playersValid = totalFromDirs <= MAX_TOTAL_PLAYERS;
+  const widthMax = vera20k ? VERA_MAX_SIDE : WIDTH_MAX;
+  const heightMax = vera20k ? VERA_MAX_SIDE : HEIGHT_MAX;
+  const playersMax = vera20k ? VERA_MAX_TOTAL_PLAYERS : PLAYERS_MAX;
+  const maxTotalPlayers = vera20k ? VERA_MAX_TOTAL_PLAYERS : MAX_TOTAL_PLAYERS;
+  const perDirMax = (dir: Direction) =>
+    vera20k && CARDINAL_DIRECTIONS.includes(dir)
+      ? MAX_CARDINAL_PLAYERS
+      : vera20k
+        ? VERA_MAX_TOTAL_PLAYERS
+        : MAX_PLAYERS_PER_DIR;
+
+  const playersValid = totalRandom || (totalPlayers > 0
+    ? totalPlayers <= playersMax
+    : totalFromDirs <= maxTotalPlayers);
 
   function handlePlayerChange(dir: Direction, e: ChangeEvent<HTMLInputElement>) {
     const raw = e.target.value;
@@ -177,7 +212,7 @@ export default function GeneratePage() {
     }
     let n = Number.parseInt(raw, 10);
     if (Number.isNaN(n)) n = 0;
-    n = Math.max(0, Math.min(MAX_PLAYERS_PER_DIR, n));
+    n = Math.max(0, Math.min(perDirMax(dir), n));
     setPlayers(prev => ({ ...prev, [dir]: n }));
   }
 
@@ -185,17 +220,37 @@ export default function GeneratePage() {
     const raw = e.target.value;
     let n = raw === '' ? 0 : Number.parseInt(raw, 10);
     if (Number.isNaN(n)) n = 0;
-    setTotalPlayers(Math.max(PLAYERS_MIN, Math.min(PLAYERS_MAX, n)));
+    const clamped = Math.max(PLAYERS_MIN, Math.min(playersMax, n));
+    setTotalPlayers(clamped);
+    if (clamped > 0) setPlayers(distributePlayers(clamped));
   }
 
   function handleWidthChange(e: ChangeEvent<HTMLInputElement>) {
     const n = safeParseInt(e.target.value, 0);
-    setWidth(Math.max(0, Math.min(WIDTH_MAX, n)));
+    setWidth(Math.max(0, Math.min(widthMax, n)));
   }
 
   function handleHeightChange(e: ChangeEvent<HTMLInputElement>) {
     const n = safeParseInt(e.target.value, 0);
-    setHeight(Math.max(0, Math.min(HEIGHT_MAX, n)));
+    setHeight(Math.max(0, Math.min(heightMax, n)));
+  }
+
+  function handleVera20kToggle(checked: boolean) {
+    setVera20k(checked);
+    if (checked) {
+      setTotalRandom(false);
+      setWidth(500);
+      setHeight(500);
+      setTotalPlayers(VERA_MAX_TOTAL_PLAYERS);
+      setPlayers(distributePlayers(VERA_MAX_TOTAL_PLAYERS));
+    } else {
+      if (width > WIDTH_MAX) setWidth(WIDTH_MAX);
+      if (height > HEIGHT_MAX) setHeight(HEIGHT_MAX);
+      if (totalPlayers > PLAYERS_MAX) {
+        setTotalPlayers(PLAYERS_MAX);
+        setPlayers(distributePlayers(PLAYERS_MAX));
+      }
+    }
   }
 
   function handleSmudgeChange(e: ChangeEvent<HTMLInputElement>) {
@@ -207,20 +262,44 @@ export default function GeneratePage() {
     if (theaters.length === 0) return '没有可用的地图类型，请检查后端服务';
     if (!theaterType) return '请选择地图类型';
     if (!mapName.trim()) return '地图名称不能为空';
-    // width/height 允许 0 (随机) 或 90-200
-    if (width !== 0 && (width < WIDTH_MIN || width > WIDTH_MAX)) {
-      return `地图宽度需为 0(随机) 或 ${WIDTH_MIN}-${WIDTH_MAX}`;
-    }
-    if (height !== 0 && (height < HEIGHT_MIN || height > HEIGHT_MAX)) {
-      return `地图高度需为 0(随机) 或 ${HEIGHT_MIN}-${HEIGHT_MAX}`;
+    if (vera20k) {
+      if (totalRandom) return 'VERA20k 模式不支持完全随机';
+      if (width === 0 || height === 0) return 'VERA20k 模式需要指定宽高（默认 500×500）';
+      if (width < WIDTH_MIN || width > VERA_MAX_SIDE) {
+        return `VERA20k 宽度需为 ${WIDTH_MIN}-${VERA_MAX_SIDE}`;
+      }
+      if (height < HEIGHT_MIN || height > VERA_MAX_SIDE) {
+        return `VERA20k 高度需为 ${HEIGHT_MIN}-${VERA_MAX_SIDE}`;
+      }
+      if (width + height > VERA_MAX_SPAN) {
+        return `VERA20k 限制宽+高 ≤ ${VERA_MAX_SPAN}（当前 ${width + height}）；1000×1000 会被 VERA20k 拒绝`;
+      }
+    } else {
+      // width/height 允许 0 (随机) 或 90-200
+      if (width !== 0 && (width < WIDTH_MIN || width > WIDTH_MAX)) {
+        return `地图宽度需为 0(随机) 或 ${WIDTH_MIN}-${WIDTH_MAX}`;
+      }
+      if (height !== 0 && (height < HEIGHT_MIN || height > HEIGHT_MAX)) {
+        return `地图高度需为 0(随机) 或 ${HEIGHT_MIN}-${HEIGHT_MAX}`;
+      }
     }
     if (!totalRandom) {
-      if (totalFromDirs > MAX_TOTAL_PLAYERS) {
-        return `玩家总数 ${totalFromDirs} 超过上限 ${MAX_TOTAL_PLAYERS}`;
-      }
-      for (const d of DIRECTIONS) {
-        if (players[d] < 0 || players[d] > MAX_PLAYERS_PER_DIR) {
-          return `${DIRECTION_LABELS[d]} 玩家数需在 0-${MAX_PLAYERS_PER_DIR} 之间`;
+      if (totalPlayers > 0) {
+        if (totalPlayers > playersMax) {
+          return `玩家总数 ${totalPlayers} 超过上限 ${playersMax}`;
+        }
+      } else {
+        if (totalFromDirs > maxTotalPlayers) {
+          return `玩家总数 ${totalFromDirs} 超过上限 ${maxTotalPlayers}`;
+        }
+        for (const d of DIRECTIONS) {
+          const n = players[d] ?? 0;
+          if (n < 0 || n > perDirMax(d)) {
+            return `${DIRECTION_LABELS[d]} 玩家数需在 0-${perDirMax(d)} 之间`;
+          }
+        }
+        if (vera20k && totalFromDirs === 0) {
+          return 'VERA20k 模式请设置总玩家数或方向人数';
         }
       }
     }
@@ -231,15 +310,43 @@ export default function GeneratePage() {
   }
 
   /** Distribute N players evenly across 8 directions. */
-  function distributePlayers(total: number): Record<string, number> {
-    if (total <= 0) return {};
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-    const result: Record<string, number> = {};
+  function distributePlayers(total: number): Players {
+    const result: Players = { ...EMPTY_PLAYERS };
+    if (total <= 0) return result;
+    const dirs: Direction[] = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     for (let i = 0; i < total; i++) {
       const d = dirs[i % 8];
       result[d] = (result[d] || 0) + 1;
     }
     return result;
+  }
+
+  function clearCncmapsPreview() {
+    if (cncmapsUrlRef.current) {
+      URL.revokeObjectURL(cncmapsUrlRef.current);
+      cncmapsUrlRef.current = null;
+    }
+    setCncmapsPreviewUrl(null);
+    setCncmapsLightbox(false);
+  }
+
+  async function startCncmapsPreview(mapText: string, name: string) {
+    const seq = ++cncmapsSeq.current;
+    clearCncmapsPreview();
+    setCncmapsStatus('loading');
+    setCncmapsError(null);
+    try {
+      const blob = await fetchCncmapsPreview(mapText, name, 1600);
+      if (seq !== cncmapsSeq.current) return;
+      const url = URL.createObjectURL(blob);
+      cncmapsUrlRef.current = url;
+      setCncmapsPreviewUrl(url);
+      setCncmapsStatus('success');
+    } catch (e) {
+      if (seq !== cncmapsSeq.current) return;
+      setCncmapsStatus('error');
+      setCncmapsError(e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -253,22 +360,26 @@ export default function GeneratePage() {
       return;
     }
 
-    const isRandom = totalRandom || totalPlayers === 0;
+    cncmapsSeq.current += 1;
+    clearCncmapsPreview();
+    setCncmapsStatus('idle');
+    setCncmapsError(null);
+
+    // 总人数 >0 时按「快捷」均分；为 0 且有方向计数时用方向计数；两者都空才随机。
+    const isRandom = totalRandom || (totalPlayers === 0 && totalFromDirs === 0);
     const payload: GenerateRequest = {
       width,
       height,
       theaterType,
       name: mapName.trim(),
       gamemode,
-      // 随机模式下不传 playerLocations：后端会走 C# TotalRandom 的随机出生点逻辑
-      // （generator.ts: totalRandom && !playerLocations → randomPlayerLocations()）。
-      // 传全 0 的对象会让 `!options.playerLocations` 不成立，导致出生点为 0。
       ...(isRandom
         ? {}
         : { playerLocations: totalPlayers > 0 ? distributePlayers(totalPlayers) : players }),
       damagedBuilding: damageEnabled ? { min: damageMin, max: damageMax, destroyP } : false,
       totalRandom: isRandom,
-      smudge
+      smudge,
+      vera20k
     };
 
     setStatus({ kind: 'loading' });
@@ -283,7 +394,14 @@ export default function GeneratePage() {
         let msg = `生成失败 (HTTP ${res.status})`;
         try {
           const text = await res.text();
-          if (text) msg = `${msg}: ${text}`;
+          if (text) {
+            let detail = text;
+            try {
+              const parsed = JSON.parse(text) as { error?: unknown };
+              if (typeof parsed.error === 'string' && parsed.error.trim()) detail = parsed.error;
+            } catch { /* 非 JSON 错误体，原样展示 */ }
+            msg = `${msg}: ${detail}`;
+          }
         } catch { /* ignore */ }
         throw new Error(msg);
       }
@@ -310,6 +428,7 @@ export default function GeneratePage() {
         .catch(() => setGenPreview(null));
 
       setStatus({ kind: 'success', message: `地图已生成: ${filename}` });
+      void startCncmapsPreview(mapText, filename);
     } catch (e) {
       setStatus({
         kind: 'error',
@@ -324,6 +443,21 @@ export default function GeneratePage() {
       <section className="section">
         <h2 className="section-title">基本参数</h2>
         <div className="grid">
+          <div className="field" style={{ gridColumn: '1 / -1' }}>
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={vera20k}
+                onChange={e => handleVera20kToggle(e.target.checked)}
+              />
+              <span>VERA20k 适配（30 人 / 大图）</span>
+            </label>
+            <span className="field-hint">
+              勾选后默认 500×500、30 人；单边 ≤ {VERA_MAX_SIDE}，且宽+高 ≤ {VERA_MAX_SPAN}
+              （1000×1000 会被 VERA20k 拒绝，最大正方形 512×512）。
+            </span>
+          </div>
+
           <div className="field">
             <label htmlFor="theaterType">地图类型</label>
             <select
@@ -349,12 +483,16 @@ export default function GeneratePage() {
             <input
               id="width"
               type="number"
-              min={0}
-              max={WIDTH_MAX}
+              min={vera20k ? WIDTH_MIN : 0}
+              max={widthMax}
               value={width}
               onChange={handleWidthChange}
             />
-            <span className="field-hint">0=随机，范围 {WIDTH_MIN}-{WIDTH_MAX}</span>
+            <span className="field-hint">
+              {vera20k
+                ? `${WIDTH_MIN}-${VERA_MAX_SIDE}，且宽+高 ≤ ${VERA_MAX_SPAN}`
+                : `0=随机，范围 ${WIDTH_MIN}-${WIDTH_MAX}`}
+            </span>
           </div>
 
           <div className="field">
@@ -362,12 +500,16 @@ export default function GeneratePage() {
             <input
               id="height"
               type="number"
-              min={0}
-              max={HEIGHT_MAX}
+              min={vera20k ? HEIGHT_MIN : 0}
+              max={heightMax}
               value={height}
               onChange={handleHeightChange}
             />
-            <span className="field-hint">0=随机，范围 {HEIGHT_MIN}-{HEIGHT_MAX}</span>
+            <span className="field-hint">
+              {vera20k
+                ? `${HEIGHT_MIN}-${VERA_MAX_SIDE}，且宽+高 ≤ ${VERA_MAX_SPAN}`
+                : `0=随机，范围 ${HEIGHT_MIN}-${HEIGHT_MAX}`}
+            </span>
           </div>
 
           <div className="field">
@@ -419,9 +561,13 @@ export default function GeneratePage() {
             <input
               type="checkbox"
               checked={totalRandom}
+              disabled={vera20k}
               onChange={e => setTotalRandom(e.target.checked)}
             />
-            <span>完全随机（勾选后忽略玩家位置设置，随机生成所有参数）</span>
+            <span>
+              完全随机（勾选后忽略玩家位置设置，随机生成所有参数）
+              {vera20k ? '（VERA20k 模式不可用）' : ''}
+            </span>
           </label>
         </div>
 
@@ -433,12 +579,14 @@ export default function GeneratePage() {
                 id="totalPlayers"
                 type="number"
                 min={PLAYERS_MIN}
-                max={PLAYERS_MAX}
+                max={playersMax}
                 value={totalPlayers}
                 onChange={handlePlayersChange}
                 disabled={totalRandom}
               />
-              <span className="field-hint">0=随机，范围 {PLAYERS_MIN}-{PLAYERS_MAX}</span>
+              <span className="field-hint">
+                0=使用下方方向计数（全 0 则随机），范围 {PLAYERS_MIN}-{playersMax}
+              </span>
             </div>
           </div>
 
@@ -450,7 +598,7 @@ export default function GeneratePage() {
                   id={`player-${dir}`}
                   type="number"
                   min={0}
-                  max={MAX_PLAYERS_PER_DIR}
+                  max={perDirMax(dir)}
                   value={players[dir]}
                   onChange={e => handlePlayerChange(dir, e)}
                   disabled={totalRandom}
@@ -458,6 +606,13 @@ export default function GeneratePage() {
               </div>
             ))}
           </div>
+          {vera20k && (
+            <span className="field-hint">
+              VERA20k：正向 N/S/W/E 每方向最多 {MAX_CARDINAL_PLAYERS} 个，总人数最多{' '}
+              {VERA_MAX_TOTAL_PLAYERS}。总人数 &gt;0 时按快捷均分，设为 0 才使用下方方向计数。
+              尺寸过小时出生点可能放不下，届时会提示减少人数或增大地图。
+            </span>
+          )}
         </div>
       </section>
 
@@ -563,11 +718,44 @@ export default function GeneratePage() {
           </div>
         )}
 
+        {status.kind === 'success' && (
+          <div className="preview-block">
+            <span className="field-hint">
+              cncmaps 渲染预览（1600px；500×500 约 15–30 秒）
+            </span>
+            {cncmapsStatus === 'loading' && (
+              <div className="status status-loading">
+                <span className="spinner" />
+                cncmaps 渲染中...
+              </div>
+            )}
+            {cncmapsStatus === 'error' && (
+              <div className="status status-error">cncmaps 预览失败：{cncmapsError}</div>
+            )}
+            {cncmapsStatus === 'success' && cncmapsPreviewUrl && (
+              <img
+                src={cncmapsPreviewUrl}
+                alt="cncmaps 渲染预览"
+                title="点击放大"
+                onClick={() => setCncmapsLightbox(true)}
+                style={{ maxWidth: '100%', height: 'auto', display: 'block', cursor: 'zoom-in' }}
+              />
+            )}
+          </div>
+        )}
+
         {lightbox && (
           <PreviewLightbox
             preview={lightbox.preview}
             title={lightbox.title}
             onClose={() => setLightbox(null)}
+          />
+        )}
+        {cncmapsLightbox && cncmapsPreviewUrl && (
+          <ImageLightbox
+            src={cncmapsPreviewUrl}
+            title="cncmaps 渲染预览"
+            onClose={() => setCncmapsLightbox(false)}
           />
         )}
         {status.kind === 'error' && !validationError && (

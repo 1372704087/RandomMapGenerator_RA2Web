@@ -40,6 +40,7 @@ import {
   RmgFillMode,
 } from './rmgService';
 import { generateRmgFull } from './rmgFullService';
+import { renderCncmapsPreview } from './cncmapsPreview';
 import { GenerateOptions } from './types';
 
 // ---------------------------------------------------------------------------
@@ -202,7 +203,10 @@ app.post('/api/split/detect', (req: Request, res: Response, next: NextFunction) 
  *     "mapContent": "<完整地图 INI 文本>",
  *     "autoTheater": true,        // 可选，默认 true：按地图自身的 [Map] Theater 切
  *     "theaterType": "TEMPERATE", // autoTheater=false 时必填（手动指定）
- *     "skipEmpty": true           // 可选，默认 true，是否跳过内部为空的地块
+ *     "skipEmpty": true,          // 可选，默认 true，是否跳过内部为空的地块
+ *     "skipPartial": false,       // 可选，默认 false：跳过功能窗口内缺源地形、
+ *                                 // 会被编辑器自动补清地的边缘切片（网页层默认开启）
+ *     "frame": true               // 可选，默认 true：画窗外框
  *   }
  *
  * 切片必须按源地图自己的 theater 参数（MapUnitSize / TopCorner / indicator）进行，
@@ -226,10 +230,11 @@ app.post(
   '/api/split',
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      const { theaterType, mapContent, skipEmpty, autoTheater, frame } = req.body as {
+      const { theaterType, mapContent, skipEmpty, skipPartial, autoTheater, frame } = req.body as {
         theaterType?: string;
         mapContent?: string;
         skipEmpty?: boolean;
+        skipPartial?: boolean;
         autoTheater?: boolean;
         frame?: boolean;
       };
@@ -272,17 +277,21 @@ app.post(
         return;
       }
 
-      // frame 默认 true（网页层）：给切片画窗外框（沿用 empty.map 的手工单元框），
-      // 只落在功能窗口之外，对生成器纯视觉（见 scripts/verify-split.mjs 的惰性证明）。
+      // frame 默认开启：按 empty.map 补齐功能窗口外的框体/底色（纯视觉）；
+      // 显式传 frame=false 可关闭。边缘不完整切片保留原版格子，由预览端裁边。
+      const effectiveFrame = frame !== false;
+      const effectiveSkipPartial = skipPartial === true;
       const slices = splitFullMap(effectiveDir, mapContent, {
         skipEmpty: skipEmpty ?? true,
-        frame: frame ?? true,
+        skipPartial: effectiveSkipPartial,
+        frame: effectiveFrame,
       });
 
       res.json({
         theater: theater.theaterEnum,
         theaterDir: effectiveDir,
-        frame: frame ?? true,
+        frame: effectiveFrame,
+        skipPartial: effectiveSkipPartial,
         detectedTheater: detection.engineTheater,
         detectedTheaterDir: detection.dir,
         theaterSource: source,
@@ -410,7 +419,11 @@ app.post('/api/rmg/generate', (req: Request, res: Response, next: NextFunction) 
  */
 app.post('/api/preview', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { contents } = req.body as { contents?: unknown };
+    const { contents, cropEmpty, transparentEmpty } = req.body as {
+      contents?: unknown;
+      cropEmpty?: unknown;
+      transparentEmpty?: unknown;
+    };
     if (
       !Array.isArray(contents) ||
       contents.length === 0 ||
@@ -423,14 +436,54 @@ app.post('/api/preview', (req: Request, res: Response, next: NextFunction) => {
     const minimapContent = getGlobalResources().minimapContent;
     const items = contents.map((c) => {
       const theater = detectTheater(c).engineTheater;
-      const p = renderMapPreview(c, minimapContent, theater);
+      const p = renderMapPreview(c, minimapContent, theater, {
+        cropEmpty: cropEmpty === true,
+        transparentEmpty: transparentEmpty === true,
+        mapUnitWindow: cropEmpty === true,
+      });
       return {
         width: p.width,
         height: p.height,
         rgb: Buffer.from(p.rgb).toString('base64'),
+        ...(p.alpha ? { alpha: Buffer.from(p.alpha).toString('base64') } : {}),
       };
     });
     res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/cncmaps-preview
+ * 用 cncmaps-ts 渲染生成地图的缩略预览。
+ *
+ * 请求体: { mapContent: string, name?: string, width?: number }
+ * 响应: image/png（默认 1600px 宽；500×500 全图约 30s）
+ *
+ * 依赖 cncmaps Web 服务（默认 http://127.0.0.1:5174），可用 CNCMAPS_WEB_URL 覆盖。
+ */
+app.post('/api/cncmaps-preview', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { mapContent, name, width } = req.body as {
+      mapContent?: unknown;
+      name?: unknown;
+      width?: unknown;
+    };
+    if (typeof mapContent !== 'string' || mapContent.trim().length === 0) {
+      res.status(400).json({ error: 'mapContent is required and must be a non-empty string' });
+      return;
+    }
+    const previewWidth = typeof width === 'number' && Number.isFinite(width) ? width : 1600;
+    const png = await renderCncmapsPreview(
+      mapContent,
+      typeof name === 'string' && name.trim() ? name : 'Random Map',
+      previewWidth,
+    );
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Length', png.length);
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(png);
   } catch (err) {
     next(err);
   }
@@ -459,8 +512,14 @@ if (fs.existsSync(webDistPath)) {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('[server] Unhandled error:', err);
-  res.status(500).json({
+  const maybeStatus = (err as unknown as { statusCode?: unknown }).statusCode;
+  const status = typeof maybeStatus === 'number' ? maybeStatus : 500;
+  if (status >= 500) {
+    console.error('[server] Unhandled error:', err);
+  } else {
+    console.warn(`[server] Request rejected: ${err.message}`);
+  }
+  res.status(status).json({
     error: err.message || 'Internal server error',
   });
 });
@@ -487,6 +546,21 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
   if (!theater) {
     const available = getTheaterInfoList().map((t) => t.name);
     return `Unknown theaterType: "${options.theaterType}". Available: ${available.join(', ')}`;
+  }
+
+  const vera20k = options.vera20k === true;
+  const width = options.width ?? 0;
+  const height = options.height ?? 0;
+  if (vera20k) {
+    if (options.totalRandom) {
+      return 'VERA20k mode requires explicit width/height and playerLocations (totalRandom is not supported)';
+    }
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+      return 'VERA20k mode requires positive integer width and height';
+    }
+    if (width > 512 || height > 512 || width + height > 1024) {
+      return `VERA20k size limit is each side <= 512 and width+height <= 1024; got ${width}x${height}`;
+    }
   }
 
   // width/height 可以是 0（表示随机），但如果是非零值必须为正整数
@@ -524,11 +598,20 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
       ) {
         return `playerLocations.${dir} must be a non-negative integer`;
       }
+      if (
+        vera20k &&
+        ['N', 'S', 'W', 'E'].includes(dir) &&
+        typeof count === 'number' &&
+        count > 4
+      ) {
+        return `VERA20k: playerLocations.${dir} must be at most 4 (cardinal placement pattern)`;
+      }
       totalPlayers += count ?? 0;
     }
 
-    if (totalPlayers > 8) {
-      return `Total player count (${totalPlayers}) must not exceed 8`;
+    const maxPlayers = vera20k ? 30 : 8;
+    if (totalPlayers > maxPlayers) {
+      return `Total player count (${totalPlayers}) must not exceed ${maxPlayers}`;
     }
   }
 

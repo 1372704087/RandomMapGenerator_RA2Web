@@ -2234,9 +2234,9 @@ export class WorkingMap {
    *
    * 对应 C# ReadyForMiniMap()。
    */
-  public static ReadyForMiniMap(): void {
+  public static ReadyForMiniMap(maxWaypoints: number = 8): void {
     for (let k = 0; k < WorkingMap.WaypointList.length; k++) {
-      if (k > 7) {
+      if (k >= maxWaypoints) {
         break;
       }
       const waypoint = WorkingMap.WaypointList[k];

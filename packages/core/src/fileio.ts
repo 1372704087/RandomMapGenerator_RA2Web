@@ -464,6 +464,11 @@ export class MapFile {
         }
     }
 
+    /** VERA20k picks the overlay plane from [Map] Size: 512² up to sum 512, else 1024². */
+    private OverlayGridSide(): number {
+        return this.Width + this.Height > 512 ? 1024 : 512;
+    }
+
     /**
      * Read [OverlayPack] / [OverlayDataPack] and rebuild {@link OverlayList}.
      * Returns null when the required sections are missing.
@@ -485,8 +490,9 @@ export class MapFile {
             sectionIndex++;
         }
 
+        const overlaySide = this.OverlayGridSide();
         const format80Data = base64Decode(overlayPackString);
-        const overlayPack = new Uint8Array(1 << 18);
+        const overlayPack = new Uint8Array(overlaySide * overlaySide).fill(0xff);
         Format5.decodeInto(format80Data, overlayPack, 80);
 
         const overlayDataSection = mapFile.GetSection('OverlayDataPack');
@@ -500,11 +506,11 @@ export class MapFile {
         }
 
         const format80Data2 = base64Decode(overlayDataPackString);
-        const overlayDataPack = new Uint8Array(1 << 18);
+        const overlayDataPack = new Uint8Array(overlaySide * overlaySide);
         Format5.decodeInto(format80Data2, overlayDataPack, 80);
 
         for (const tile of this.IsoTileList) {
-            const idx = tile.Rx + 512 * tile.Ry;
+            const idx = tile.Rx + overlaySide * tile.Ry;
             const overlayId = overlayPack[idx];
             if (overlayId !== 0xff) {
                 const overlayValue = overlayDataPack[idx];
@@ -518,12 +524,15 @@ export class MapFile {
 
     /** Serialise {@link OverlayList} into [OverlayPack] / [OverlayDataPack]. */
     public SaveOverlay(iniContent: string): string {
-        const overlayPack = new Uint8Array(1 << 18).fill(0xff);
-        const overlayDataPack = new Uint8Array(1 << 18);
+        // VERA20k selects the overlay plane from [Map] Size alone: original maps
+        // (width+height<=512) use a 512² grid; larger maps use 1024².
+        const overlaySide = this.OverlayGridSide();
+        const overlayPack = new Uint8Array(overlaySide * overlaySide).fill(0xff);
+        const overlayDataPack = new Uint8Array(overlaySide * overlaySide);
 
         for (const overlay of this.OverlayList) {
             if (overlay.Tile === null) continue;
-            const index = overlay.Tile.Rx + 512 * overlay.Tile.Ry;
+            const index = overlay.Tile.Rx + overlaySide * overlay.Tile.Ry;
             overlayPack[index] = overlay.OverlayID;
             overlayDataPack[index] = overlay.OverlayValue;
         }
@@ -576,10 +585,17 @@ export class MapFile {
     }
 
     /**
-     * Translate [Waypoints] player positions into [Header] Waypoint1..8
+     * Translate [Waypoints] player positions into [Header] WaypointN
      * entries and update the player-count metadata.
+     *
+     * Retail maps stop at eight starts. VERA20k's extended maps declare up to 30
+     * and additionally need the plural `MaxPlayers` key read by its capacity
+     * query (`skirmish_player_capacity`).
      */
-    public CalculateStartingWaypoints(iniContent: string): string {
+    public CalculateStartingWaypoints(
+        iniContent: string,
+        options?: { maxStartingPoints?: number; vera20k?: boolean },
+    ): string {
         const mapFile = new IniFile(iniContent);
         const localSize = mapFile.GetStringValue('Map', 'LocalSize', '0,0,0,0');
         const localWidth = parseInt(localSize.split(',')[2], 10);
@@ -587,8 +603,9 @@ export class MapFile {
         mapFile.SetStringValue('Header', 'Width', (localWidth - 1).toString());
         mapFile.SetStringValue('Header', 'Height', localHeight.toString());
 
+        const maxStartingPoints = options?.maxStartingPoints ?? 8;
         let playerNum = 0;
-        while (mapFile.KeyExists('Waypoints', playerNum.toString()) && playerNum < 8) {
+        while (mapFile.KeyExists('Waypoints', playerNum.toString()) && playerNum < maxStartingPoints) {
             const waypoint = mapFile.GetStringValue('Waypoints', playerNum.toString(), '000000');
             const length = waypoint.length;
             const x = parseInt(waypoint.slice(length - 3, length), 10);
@@ -606,6 +623,11 @@ export class MapFile {
             mapFile.SetStringValue('Basic', 'MinPlayer', '1');
         } else if (playerNum === 0) {
             mapFile.SetStringValue('Basic', 'MinPlayer', '0');
+        }
+        if (options?.vera20k) {
+            mapFile.SetStringValue('Basic', 'MaxPlayers', playerNum.toString());
+            const minPlayer = mapFile.GetStringValue('Basic', 'MinPlayer', '1');
+            mapFile.SetStringValue('Basic', 'MinPlayers', minPlayer);
         }
 
         return mapFile.WriteIniFile();

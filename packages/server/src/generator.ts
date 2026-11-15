@@ -30,6 +30,30 @@ import {
 } from './types';
 
 // ---------------------------------------------------------------------------
+// 玩家 / 尺寸上限
+// ---------------------------------------------------------------------------
+
+/** 原版最多 8 个出生点（waypoints 0..7）。 */
+const MAX_PLAYERS_RETAIL = 8;
+/** VERA20k 的 [Basic] MaxPlayers 扩展范围上限。 */
+const MAX_PLAYERS_VERA20K = 30;
+/** VERA20k 的 [Map] Size 硬限：Width+Height ≤ 1024，单边最大 512（最大正方形）。 */
+const VERA20K_MAX_SIDE = 512;
+const VERA20K_MAX_SPAN = 1024;
+/** N/S/W/E 的 PlacePlayerLocation 只实现了 4 个偏移，超过会静默丢弃。 */
+const MAX_PLAYERS_CARDINAL = 4;
+const CARDINAL_DIRECTIONS: readonly Direction[] = ['N', 'S', 'W', 'E'];
+
+/** 输入组合不合法（不是服务器内部故障）；HTTP 层应回 400。 */
+export class GenerateInputError extends Error {
+  readonly statusCode = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = 'GenerateInputError';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 串行化队列
 // ---------------------------------------------------------------------------
 
@@ -97,12 +121,13 @@ export async function generateMap(
 function doGenerateMap(options: GenerateOptions): GenerateResult {
   const theater = getTheaterResources(options.theaterType);
   if (!theater) {
-    throw new Error(
+    throw new GenerateInputError(
       `Unknown theater: "${options.theaterType}". Available theaters: ${listTheaterNames()}`,
     );
   }
 
   const globalRes = getGlobalResources();
+  const vera20k = options.vera20k === true;
 
   // 在 totalRandom 模式下，随机生成玩家位置
   const playerLocations: PlayerLocations = options.totalRandom && !options.playerLocations
@@ -111,15 +136,39 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
 
   // 计算玩家总数
   const totalPlayers = countPlayers(playerLocations);
-  if (totalPlayers > 8) {
-    throw new Error(
-      `Total player count (${totalPlayers}) exceeds maximum (8).`,
+  const maxPlayers = vera20k ? MAX_PLAYERS_VERA20K : MAX_PLAYERS_RETAIL;
+  if (totalPlayers > maxPlayers) {
+    throw new GenerateInputError(
+      `Total player count (${totalPlayers}) exceeds maximum (${maxPlayers}).`,
     );
+  }
+  if (vera20k) {
+    for (const dir of CARDINAL_DIRECTIONS) {
+      const count = playerLocations[dir] ?? 0;
+      if (count > MAX_PLAYERS_CARDINAL) {
+        throw new GenerateInputError(
+          `VERA20k: ${dir} has ${count} players but the cardinal placement pattern supports only ${MAX_PLAYERS_CARDINAL}.`,
+        );
+      }
+    }
   }
 
   // 确定地图尺寸
   let width = options.width;
   let height = options.height;
+  if (vera20k) {
+    if (options.totalRandom) {
+      throw new GenerateInputError('VERA20k mode does not support totalRandom; specify size and player locations.');
+    }
+    if (width === 0 || height === 0) {
+      throw new GenerateInputError('VERA20k mode requires explicit width and height.');
+    }
+    if (width > VERA20K_MAX_SIDE || height > VERA20K_MAX_SIDE || width + height > VERA20K_MAX_SPAN) {
+      throw new GenerateInputError(
+        `VERA20k size limit is width+height <= ${VERA20K_MAX_SPAN} and each side <= ${VERA20K_MAX_SIDE}; got ${width}x${height}.`,
+      );
+    }
+  }
   if (options.totalRandom || width === 0 || height === 0) {
     const size = randomMapSize(theater, totalPlayers);
     width = size;
@@ -128,12 +177,12 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
 
   // 确保尺寸为正整数
   if (width <= 0 || height <= 0) {
-    throw new Error(`Invalid map size: ${width}x${height}`);
+    throw new GenerateInputError(`Invalid map size: ${width}x${height}`);
   }
 
   console.log(
     `[generator] Generating map: ${width}x${height}, theater=${options.theaterType}, ` +
-      `players=${totalPlayers}, gamemode=${options.gamemode ?? 'default'}`,
+      `players=${totalPlayers}, vera20k=${vera20k}, gamemode=${options.gamemode ?? 'default'}`,
   );
 
   // 步骤 2: 初始化地图网格
@@ -181,8 +230,26 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     }
 
     // 步骤 10: 准备小地图
-    WorkingMap.ReadyForMiniMap();
+    WorkingMap.ReadyForMiniMap(vera20k ? Math.max(MAX_PLAYERS_RETAIL, totalPlayers) : MAX_PLAYERS_RETAIL);
   });
+
+  // VERA20k 的容量查询要求 [Waypoints] 0..N-1 全部存在且坐标非 0；
+  // 少一个就会退回 8 人，因此这里按实际放置结果硬校验。
+  if (vera20k) {
+    const starts = WorkingMap.WaypointList;
+    if (starts.length < totalPlayers) {
+      throw new GenerateInputError(
+        `VERA20k 需要 ${totalPlayers} 个连续出生点，但只放下 ${starts.length} 个；` +
+          `请减少某个方向的玩家数或增大地图尺寸。`,
+      );
+    }
+    for (let i = 0; i < totalPlayers; i++) {
+      const wp = starts[i];
+      if (!wp || (wp.X === 0 && wp.Y === 0)) {
+        throw new GenerateInputError(`VERA20k start waypoint ${i} is missing or at cell (0,0).`);
+      }
+    }
+  }
 
   // 步骤 11: 创建 MapFile 并设置属性
   const mapFile = new MapFile();
@@ -218,7 +285,10 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
   }
 
   // 步骤 13: 计算起始路径点
-  ini = mapFile.CalculateStartingWaypoints(ini);
+  ini = mapFile.CalculateStartingWaypoints(
+    ini,
+    vera20k ? { maxStartingPoints: MAX_PLAYERS_VERA20K, vera20k: true } : undefined,
+  );
 
   // 步骤 14: 随机光照（仅有光照设置的 theater）
   if (theater.lightingSettings) {

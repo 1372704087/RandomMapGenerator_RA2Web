@@ -4,6 +4,7 @@ import {
   splitMap,
   detectSplitTheater,
   fetchMapPreviews,
+  fetchCncmapsPreview,
   downloadText,
   type MapPreviewData,
   type MapSplitSlice,
@@ -13,6 +14,7 @@ import {
 } from '../api';
 import MapPreviewCanvas from '../components/MapPreviewCanvas';
 import PreviewLightbox from '../components/PreviewLightbox';
+import ImageLightbox from '../components/ImageLightbox';
 
 // ============== 类型 ==============
 
@@ -35,6 +37,11 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
+/** 边缘切片：功能窗口内缺源地形，文件里是空洞（不写缺失格）。 */
+function isPartialSliceContent(content: string): boolean {
+  return /^\s*PartialMapUnit\s*=\s*yes\s*$/im.test(content);
+}
+
 // ============== 组件 ==============
 
 export default function SplitPage() {
@@ -45,6 +52,11 @@ export default function SplitPage() {
   const [mapContent, setMapContent] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [skipEmpty, setSkipEmpty] = useState(true);
+  /**
+   * 跳过功能窗口内缺源地图地形的边缘切片：这类切片在编辑器里会被 [Map] Size
+   * 自动补清地，默认跳过（想保留原版格子/空洞时取消勾选）。
+   */
+  const [skipPartial, setSkipPartial] = useState(true);
 
   /** 默认按地图内容自动识别 theater —— 手动选错会导致单元尺寸不符、地形错位 */
   const [autoTheater, setAutoTheater] = useState(true);
@@ -53,8 +65,7 @@ export default function SplitPage() {
 
   /**
    * 窗外框：沿用手工单元的画法（empty.map 的框图块），只画在功能窗口之外，
-   * 对生成器纯视觉（已由 verify-split 的惰性证明背书）。
-   * 开了它，切片在地图编辑器里不再是一片空白。
+   * 对生成器纯视觉（已由 verify-split 的惰性证明背书）。默认开启。
    */
   const [frame, setFrame] = useState(true);
 
@@ -68,6 +79,18 @@ export default function SplitPage() {
   const [slicePreviews, setSlicePreviews] = useState<Record<string, MapPreviewData>>({});
   /** 大图查看器（灯箱） */
   const [lightbox, setLightbox] = useState<{ preview: MapPreviewData; title: string } | null>(null);
+  /** 点击切片后的 cncmaps 渲染 */
+  const [sliceRenderStatus, setSliceRenderStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [sliceRenderError, setSliceRenderError] = useState<string | null>(null);
+  const [sliceRenderUrl, setSliceRenderUrl] = useState<string | null>(null);
+  const [sliceRenderFor, setSliceRenderFor] = useState<string | null>(null);
+  const [sliceImageLightbox, setSliceImageLightbox] = useState(false);
+  const sliceRenderUrlRef = useRef<string | null>(null);
+  const sliceRenderSeq = useRef(0);
+
+  useEffect(() => () => {
+    if (sliceRenderUrlRef.current) URL.revokeObjectURL(sliceRenderUrlRef.current);
+  }, []);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -148,6 +171,7 @@ export default function SplitPage() {
     () => result?.slices.find((s) => s.name === selected) ?? null,
     [result, selected]
   );
+  const selectedSliceIsPartial = selectedSlice ? isPartialSliceContent(selectedSlice.content) : false;
 
   const stats = useMemo(() => {
     if (!result) return null;
@@ -181,6 +205,69 @@ export default function SplitPage() {
     }
   }
 
+  function clearSliceRender() {
+    sliceRenderSeq.current += 1;
+    if (sliceRenderUrlRef.current) {
+      URL.revokeObjectURL(sliceRenderUrlRef.current);
+      sliceRenderUrlRef.current = null;
+    }
+    setSliceRenderUrl(null);
+    setSliceRenderFor(null);
+    setSliceRenderStatus('idle');
+    setSliceRenderError(null);
+    setSliceImageLightbox(false);
+  }
+
+  async function renderSliceCncmaps(slice: MapSplitSlice) {
+    const seq = ++sliceRenderSeq.current;
+    if (sliceRenderUrlRef.current) {
+      URL.revokeObjectURL(sliceRenderUrlRef.current);
+      sliceRenderUrlRef.current = null;
+    }
+    setSliceRenderUrl(null);
+    setSliceRenderFor(slice.name);
+    setSliceRenderStatus('loading');
+    setSliceRenderError(null);
+    try {
+      const blob = await fetchCncmapsPreview(slice.content, `${slice.name}.map`, 1600);
+      if (seq !== sliceRenderSeq.current) return;
+      const url = URL.createObjectURL(blob);
+      sliceRenderUrlRef.current = url;
+      setSliceRenderUrl(url);
+      setSliceRenderStatus('success');
+      setSliceImageLightbox(true);
+    } catch (e) {
+      if (seq !== sliceRenderSeq.current) return;
+      setSliceRenderStatus('error');
+      setSliceRenderError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function openSliceRadarPreview(slice: MapSplitSlice) {
+    const title = `切片 ${slice.name}（grid ${slice.gridX},${slice.gridY}，原版格子）`;
+    const preview = slicePreviews[slice.name];
+    if (preview) {
+      setLightbox({ preview, title });
+      return;
+    }
+    fetchMapPreviews([slice.content], { transparentEmpty: true })
+      .then(([p]) => {
+        if (!p) return;
+        setSlicePreviews((prev) => ({ ...prev, [slice.name]: p }));
+        setLightbox({ preview: p, title });
+      })
+      .catch(() => {});
+  }
+
+  function handleSliceClick(slice: MapSplitSlice) {
+    setSelected(slice.name);
+    if (isPartialSliceContent(slice.content)) {
+      openSliceRadarPreview(slice);
+      return;
+    }
+    void renderSliceCncmaps(slice);
+  }
+
   function clearAll() {
     setMapContent('');
     setSourceName('');
@@ -189,6 +276,7 @@ export default function SplitPage() {
     setDetection(null);
     setSourcePreview(null);
     setSlicePreviews({});
+    clearSliceRender();
     setStatus({ kind: 'idle' });
     if (fileRef.current) fileRef.current.value = '';
   }
@@ -197,6 +285,7 @@ export default function SplitPage() {
     e.preventDefault();
     setResult(null);
     setSelected(null);
+    clearSliceRender();
 
     if (mapContent.trim().length === 0) {
       setStatus({ kind: 'error', message: '请粘贴或上传一张完整地图的文本内容' });
@@ -223,12 +312,13 @@ export default function SplitPage() {
         autoTheater,
         theaterType: autoTheater ? undefined : theaterType,
         skipEmpty,
+        skipPartial,
         frame,
       });
       setResult(res);
       if (res.slices.length > 0) setSelected(res.slices[0].name);
       // 批量渲染切片缩略图（一次请求把全部切片渲染完）
-      fetchMapPreviews(res.slices.map((s) => s.content))
+      fetchMapPreviews(res.slices.map((s) => s.content), { transparentEmpty: true })
         .then((items) => {
           const map: Record<string, MapPreviewData> = {};
           res.slices.forEach((s, i) => { if (items[i]) map[s.name] = items[i]; });
@@ -239,7 +329,7 @@ export default function SplitPage() {
         kind: 'success',
         message: res.count > 0
           ? `已按 ${res.theaterDir}（单元 ${res.unitSize}${res.theaterSource === 'auto' ? '，自动识别' : '，手动指定'}）拆解出 ${res.count} 张切片`
-          : '拆解完成，但没有任何切片产出（可能全部为内部空地，试关闭「跳过内部空地」）',
+          : '拆解完成，但没有任何切片产出（试关闭「跳过内部空地」或「跳过不完整的边缘切片」）',
       });
     } catch (err) {
       setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -269,6 +359,7 @@ export default function SplitPage() {
       detectedTheater: result.detectedTheater,
       frame: result.frame,
       skipEmpty,
+      skipPartial: result.skipPartial,
       count: result.count,
       slices: result.slices.map((s) => ({
         name: s.name,
@@ -403,10 +494,21 @@ export default function SplitPage() {
           <label className="checkbox-label">
             <input
               type="checkbox"
+              checked={skipPartial}
+              onChange={(e) => setSkipPartial(e.target.checked)}
+            />
+            <span>跳过不完整的边缘切片（推荐；否则编辑器会把窗内缺失格自动补成清地）</span>
+          </label>
+        </div>
+
+        <div className="field field-inline" style={{ marginTop: 8 }}>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
               checked={frame}
               onChange={(e) => setFrame(e.target.checked)}
             />
-            <span>绘制单元边框（沿用手工单元画法，只画在功能区之外，编辑器里不再大片空白）</span>
+            <span>绘制单元边框（默认开启；沿用手工单元画法，补齐窗外框体/底色）</span>
           </label>
         </div>
       </section>
@@ -508,22 +610,19 @@ export default function SplitPage() {
                         type="button"
                         key={slice.name}
                         className={`slice-cell ${selected === slice.name ? 'active' : ''}`}
-                        onClick={() => setSelected(slice.name)}
-                        title={`点击查看 ${slice.name}`}
+                        onClick={() => handleSliceClick(slice)}
+                        title={
+                          isPartialSliceContent(slice.content)
+                            ? `点击查看 ${slice.name} 的原版格子（空洞透明）`
+                            : `点击用 cncmaps 渲染 ${slice.name}`
+                        }
                       >
                         <span className="slice-cell-name">{slice.name}</span>
                         {slicePreviews[slice.name] && (
                           <MapPreviewCanvas
                             preview={slicePreviews[slice.name]}
                             maxWidth={56}
-                            className="slice-thumb"
-                            title={`点击放大 ${slice.name}`}
-                            onClick={() =>
-                              setLightbox({
-                                preview: slicePreviews[slice.name],
-                                title: `切片 ${slice.name}（grid ${slice.gridX},${slice.gridY}）`,
-                              })
-                            }
+                            className="slice-thumb transparent-preview"
                           />
                         )}
                         <span className="slice-cell-size">{formatBytes(slice.content.length)}</span>
@@ -556,14 +655,58 @@ export default function SplitPage() {
                 <button type="button" className="btn-secondary" onClick={() => downloadSlice(selectedSlice)}>
                   下载这一张
                 </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    if (selectedSliceIsPartial) openSliceRadarPreview(selectedSlice);
+                    else void renderSliceCncmaps(selectedSlice);
+                  }}
+                  disabled={sliceRenderFor === selectedSlice.name && sliceRenderStatus === 'loading'}
+                >
+                  {selectedSliceIsPartial
+                    ? '查看原版格子预览'
+                    : sliceRenderFor === selectedSlice.name && sliceRenderStatus === 'loading'
+                      ? 'cncmaps 渲染中...'
+                      : '用 cncmaps 渲染'}
+                </button>
               </div>
+
+              {sliceRenderFor === selectedSlice.name && !selectedSliceIsPartial && (
+                <div className="preview-block">
+                  <span className="field-hint">cncmaps 渲染预览（点击图片放大）</span>
+                  {sliceRenderStatus === 'loading' && (
+                    <div className="status status-loading">
+                      <span className="spinner" />
+                      cncmaps 渲染中...
+                    </div>
+                  )}
+                  {sliceRenderStatus === 'error' && (
+                    <div className="status status-error">cncmaps 预览失败：{sliceRenderError}</div>
+                  )}
+                  {sliceRenderStatus === 'success' && sliceRenderUrl && (
+                    <img
+                      src={sliceRenderUrl}
+                      alt={`切片 ${selectedSlice.name} 的 cncmaps 渲染`}
+                      title="点击放大"
+                      onClick={() => setSliceImageLightbox(true)}
+                      style={{ maxWidth: '100%', height: 'auto', display: 'block', cursor: 'zoom-in' }}
+                    />
+                  )}
+                </div>
+              )}
+
               {slicePreviews[selectedSlice.name] && (
                 <div className="preview-block">
-                  <span className="field-hint">本切片雷达预览（带窗外框，点击放大）</span>
+                  <span className="field-hint">
+                    {selectedSliceIsPartial
+                      ? '本切片原版格子预览（空洞透明，点击放大）'
+                      : '本切片雷达预览（带窗外框，点击放大）'}
+                  </span>
                   <MapPreviewCanvas
                     preview={slicePreviews[selectedSlice.name]}
                     maxWidth={320}
-                    className="preview-img"
+                    className="preview-img transparent-preview"
                     title="点击放大"
                     onClick={() =>
                       setLightbox({
@@ -587,6 +730,13 @@ export default function SplitPage() {
           preview={lightbox.preview}
           title={lightbox.title}
           onClose={() => setLightbox(null)}
+        />
+      )}
+      {sliceImageLightbox && sliceRenderUrl && (
+        <ImageLightbox
+          src={sliceRenderUrl}
+          title={`切片 ${sliceRenderFor ?? selected ?? ''} · cncmaps`}
+          onClose={() => setSliceImageLightbox(false)}
         />
       )}
     </form>

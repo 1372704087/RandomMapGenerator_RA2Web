@@ -19,6 +19,17 @@ export interface MapPreview {
   /** 像素高 = Height */
   height: number;
   rgb: Uint8Array;
+  /** 可选透明度（0/255）；cropEmpty 时用于表示原地图没有的格子 */
+  alpha?: Uint8Array;
+}
+
+export interface MapPreviewOptions {
+  /** 裁到实际有格子的包围盒，并把空像素标为透明 */
+  cropEmpty?: boolean;
+  /** 保持地图尺寸，把空像素标为透明（保留切片外形和空洞） */
+  transparentEmpty?: boolean;
+  /** 切片是 map unit 时，只画声明的功能窗口内格子（排除窗外框/指示块） */
+  mapUnitWindow?: boolean;
 }
 
 function clamp(v: number): number {
@@ -69,6 +80,7 @@ export function renderMapPreview(
   mapContent: string,
   minimapContent: string | null | undefined,
   theaterName: string | null,
+  options?: MapPreviewOptions,
 ): MapPreview {
   const map = new MapFile();
   map.CreateIsoTileList(mapContent);
@@ -84,6 +96,18 @@ export function renderMapPreview(
   }
 
   const mapIni = new IniFile(mapContent);
+  let mapUnitWindow: [number, number, number, number] | null = null;
+  if (options?.mapUnitWindow) {
+    const basic = mapIni.GetSection('Basic');
+    const partial = (basic?.GetStringValue('PartialMapUnit', '') ?? '').toLowerCase() === 'yes';
+    if (partial) {
+      const sx = Number.parseInt(basic!.GetStringValue('MapUnitStartX', '0'), 10);
+      const sy = Number.parseInt(basic!.GetStringValue('MapUnitStartY', '0'), 10);
+      const w = Number.parseInt(basic!.GetStringValue('MapUnitWidth', '0'), 10);
+      const h = Number.parseInt(basic!.GetStringValue('MapUnitHeight', '0'), 10);
+      if (w > 0 && h > 0) mapUnitWindow = [sx, sy, w, h];
+    }
+  }
   const terrainAt = new Map<string, string>();
   const terrainSec = mapIni.GetSection('Terrain');
   if (terrainSec) {
@@ -121,6 +145,9 @@ export function renderMapPreview(
   const width = map.Width * 2 - 1;
   const height = map.Height;
   const rgb = new Uint8Array(width * height * 3);
+  const painted = options?.cropEmpty || options?.transparentEmpty
+    ? new Uint8Array(width * height)
+    : null;
 
   for (const t of map.IsoTileList) {
     let c: Rgb;
@@ -158,10 +185,57 @@ export function renderMapPreview(
     const px = t.Dx;
     const py = (t.Dy - (t.Dx & 1)) / 2;
     if (px < 0 || px >= width || py < 0 || py >= height) continue;
+    if (mapUnitWindow) {
+      const [sx, sy, w, h] = mapUnitWindow;
+      if (t.Rx < sx || t.Rx >= sx + w || t.Ry < sy || t.Ry >= sy + h) continue;
+    }
+    if (painted && t.TileNum === -1) continue;
     const off = (py * width + px) * 3;
     rgb[off] = c.r;
     rgb[off + 1] = c.g;
     rgb[off + 2] = c.b;
+    if (painted) painted[py * width + px] = 1;
+  }
+
+  if (options?.cropEmpty && painted) {
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (!painted[y * width + x]) continue;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+    if (maxX >= minX && maxY >= minY) {
+      const cw = maxX - minX + 1;
+      const ch = maxY - minY + 1;
+      const cropped = new Uint8Array(cw * ch * 3);
+      const alpha = new Uint8Array(cw * ch);
+      for (let y = 0; y < ch; y++) {
+        for (let x = 0; x < cw; x++) {
+          const src = (y + minY) * width + (x + minX);
+          if (!painted[src]) continue;
+          const si = src * 3;
+          const di = (y * cw + x) * 3;
+          cropped[di] = rgb[si];
+          cropped[di + 1] = rgb[si + 1];
+          cropped[di + 2] = rgb[si + 2];
+          alpha[y * cw + x] = 255;
+        }
+      }
+      return { width: cw, height: ch, rgb: cropped, alpha };
+    }
+  }
+
+  if (options?.transparentEmpty && painted) {
+    const alpha = new Uint8Array(width * height);
+    for (let i = 0; i < painted.length; i++) alpha[i] = painted[i] ? 255 : 0;
+    return { width, height, rgb, alpha };
   }
 
   return { width, height, rgb };

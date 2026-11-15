@@ -111,6 +111,11 @@ export interface MapSplitOptions {
    */
   skipEmpty?: boolean;
   /**
+   * 跳过功能窗口内缺源地图地形的边缘块。
+   * 这类块在编辑器里会被 [Map] Size 自动补清地，默认由网页层开启。
+   */
+  skipPartial?: boolean;
+  /**
    * 是否给切片画「窗外框」（沿用 config.emptyMapContent 里手工单元的框图块）。
    *
    * 框只落在功能窗口之外 ⇒ 对生成器纯视觉（已由 verify-split「切片空白格语义」节
@@ -136,6 +141,7 @@ export function splitMap(
   const { mapUnitWidth: W, mapUnitHeight: H, startingX: SX, startingY: SY } =
     config;
   const skipEmpty = options?.skipEmpty ?? true;
+  const skipPartial = options?.skipPartial ?? false;
 
   // 1. 读取源地图的等距图块（绝对坐标）
   const sourceMap = new MapFile();
@@ -240,6 +246,19 @@ export function splitMap(
     return false;
   };
 
+  /** 功能窗口是否完全被源地图地形覆盖（每一格都存在且不是 -1）。 */
+  const blockFullyCovered = (i: number, j: number): boolean => {
+    const blockRX0 = OX + i * W;
+    const blockRY0 = OY + j * H;
+    for (let x = 0; x < W; x++) {
+      for (let y = 0; y < H; y++) {
+        const tile = tileByRxRy.get(`${blockRX0 + x},${blockRY0 + y}`);
+        if (!tile || tile.TileNum === -1) return false;
+      }
+    }
+    return true;
+  };
+
   // 3. 逐块生成切片
   const frame = options?.frame === true && !!config.emptyMapContent;
   const frameTemplate = frame
@@ -250,6 +269,8 @@ export function splitMap(
   for (let i = 0; i < gx; i++) {
     for (let j = 0; j < gy; j++) {
       if (skipEmpty && !blockHasTerrain(i, j)) continue;
+      if (skipPartial && !blockFullyCovered(i, j)) continue;
+      const partial = !blockFullyCovered(i, j);
       const content = buildSlice(
         i,
         j,
@@ -266,6 +287,7 @@ export function splitMap(
         seamH,
         sourceIni,
         frameTemplate,
+        partial,
       );
       slices.push({
         name: `split_${i}_${j}`,
@@ -304,6 +326,7 @@ function buildSlice(
   seamH: number[][],
   sourceIni: string,
   frameTemplate: Map<string, number> | null,
+  partial: boolean,
 ): string {
   const blockRX0 = OX + i * W;
   const blockRY0 = OY + j * H;
@@ -448,8 +471,22 @@ function buildSlice(
   }
 
   // 8. 组装并返回 INI 文本
+  // 边缘不完整切片只保留原版格子：不写 -1/缺失格，也不补平地。
+  // 预览端据此裁到内容范围并用透明背景表示空缺。
+  if (partial) {
+    sliceMap.IsoTileList = sliceMap.IsoTileList.filter((t) => t.TileNum !== -1);
+  }
   const content = sliceMap.SaveFullMap(undefined, { bottomSpace: 0 });
-  return content;
+  const out = new IniFile(content);
+  if (partial) {
+    out.SetStringValue('Basic', 'IsMapUnit', 'yes');
+    out.SetStringValue('Basic', 'PartialMapUnit', 'yes');
+    out.SetStringValue('Basic', 'MapUnitStartX', String(SX));
+    out.SetStringValue('Basic', 'MapUnitStartY', String(SY));
+    out.SetStringValue('Basic', 'MapUnitWidth', String(W));
+    out.SetStringValue('Basic', 'MapUnitHeight', String(H));
+  }
+  return out.WriteIniFile();
 }
 
 /**

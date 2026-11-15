@@ -64,13 +64,39 @@ export interface MapPreviewData {
   width: number;
   height: number;
   rgb: string;
+  /** 可选 alpha（0/255，base64）；裁剪预览用 0 表示原地图没有该格 */
+  alpha?: string;
 }
 
 /** 批量渲染雷达预览（minimap.ini 配色 + 覆盖物/地形/建筑 + 高度明暗） */
-export function fetchMapPreviews(contents: string[]): Promise<MapPreviewData[]> {
-  return postJson<{ items: MapPreviewData[] }>('/api/preview', { contents }).then(
-    (r) => r.items,
-  );
+export function fetchMapPreviews(
+  contents: string[],
+  options?: { cropEmpty?: boolean; transparentEmpty?: boolean },
+): Promise<MapPreviewData[]> {
+  return postJson<{ items: MapPreviewData[] }>('/api/preview', {
+    contents,
+    ...(options ?? {}),
+  }).then((r) => r.items);
+}
+
+/** cncmaps 渲染预览（PNG blob，默认 1600px 宽）。 */
+export async function fetchCncmapsPreview(
+  mapContent: string,
+  name: string,
+  width = 1600,
+): Promise<Blob> {
+  const res = await fetch('/api/cncmaps-preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mapContent, name, width }),
+  });
+  if (!res.ok) {
+    const detail = await readErrorText(res);
+    throw new Error(
+      detail ? `${detail} (HTTP ${res.status})` : `cncmaps 预览失败 (HTTP ${res.status})`,
+    );
+  }
+  return await res.blob();
 }
 
 /** 把预览画到 canvas（RGB → RGBA ImageData） */
@@ -83,13 +109,14 @@ export function paintPreview(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const bin = atob(preview.rgb);
+  const alphaBin = preview.alpha ? atob(preview.alpha) : null;
   const img = ctx.createImageData(preview.width, preview.height);
   const n = Math.min(bin.length / 3, preview.width * preview.height);
   for (let i = 0, j = 0; i < n; i++, j += 4) {
     img.data[j] = bin.charCodeAt(i * 3);
     img.data[j + 1] = bin.charCodeAt(i * 3 + 1);
     img.data[j + 2] = bin.charCodeAt(i * 3 + 2);
-    img.data[j + 3] = 255;
+    img.data[j + 3] = alphaBin ? alphaBin.charCodeAt(i) : 255;
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -154,6 +181,8 @@ export interface SplitResult {
   theaterSource: 'auto' | 'manual';
   /** 是否画了窗外框（沿用 empty.map 的手工单元框，仅编辑器可见） */
   frame: boolean;
+  /** 是否跳过了功能窗口内缺源地图地形的边缘切片 */
+  skipPartial: boolean;
   detection: Omit<TheaterDetection, 'engineTheater' | 'dir' | 'mapUnitSize'>;
   warnings: string[];
   unitSize: string;
@@ -173,6 +202,11 @@ export function splitMap(payload: {
   /** autoTheater=false 时必填 */
   theaterType?: string;
   skipEmpty?: boolean;
+  /**
+   * true：跳过功能窗口内缺源地图地形的边缘切片（编辑器不会给它们补清地）。
+   * 后端默认 false。
+   */
+  skipPartial?: boolean;
   /** 默认 true：给切片画窗外框（对生成器纯视觉，编辑器里不再一片空白） */
   frame?: boolean;
 }): Promise<SplitResult> {
