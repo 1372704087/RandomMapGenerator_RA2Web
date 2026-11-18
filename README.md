@@ -82,11 +82,18 @@ gitignore）。`Rmg.artDir()` 优先用游戏 `Tile资源/<theater>`，没有才
   的空格渲染成黑缝）。
 - 枫叶光照沿用雪地表（`theater != 0` 走 snow lighting），月面偏冷白，与游戏里
   TS 月面一致。
-- **已知限制**：`lunarmd.ini` 里 `HeightBase`（`hyte01..15`）与 `Mrmfx01..12`
-  是 Tiberian Sun 的高度件，YR 的 `isolun.mix` / `isolunmd.mix` 里根本没打包
-  （逐条探针确认 MISSING）。所以月面在 1 格高度差上偶有几个格子缺「台阶立面的
-  转角件」，预览里表现为极小的黑色 V 形缺口（111×111 的图上约 8 处）。这是原始
-  美术缺失，不是管线 bug；不想看到的话只能让月球图保持单层高度。
+- `CliffSet` 清零的连带影响：`shoreTileIndex` 变成 `-1` 之后，`hills.ts` 里两处
+  悬崖族的比较也必须走 `inTileFamily()`。`-1` 基址下内联区间 `[-1, 38/39]` 会把
+  `0` 号裸地（Clear）判成 CliffSet 立面，于是 `finalizeElevationSlopes` 的
+  「相邻崖面 2 级以上」保护条件对裸地误命中、直接 `continue` 跳过整格（连
+  `level` 都不写），`mergeSlopeBlocks` 的 `touchesArt` 判定也会误拒合并 ——
+  结果是裸地之间留下 1 级台阶，预览里表现为黑色 V 形缺口（111×111 的图上约 8 处，
+  只在月球出现，温带/城市/沙漠/新城市均为 0）。已修，修完月球「裸地-裸地 1 级差
+  边」从 28 条降到 0 条，其余四档地图 SHA256 逐字节不变。
+- **美术限制（不影响成图）**：`lunarmd.ini` 的 `HeightBase`（`hyte01..15`）与
+  `Mrmfx01..12` 是 Tiberian Sun 的高度件，YR 的 `isolun.mix` / `isolunmd.mix`
+  里没打包（逐条探针确认 MISSING）。月面靠 `RampBase` / `RampSmooth` 覆盖台阶，
+  现有成图已无黑缝；这两个族只在 TS 地图里用得到。
 
 ## 项目结构
 
