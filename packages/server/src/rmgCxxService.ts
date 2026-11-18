@@ -45,8 +45,9 @@ export interface CxxGenerateInput {
   timeOfDay?: number;
   /**
    * theater 选项（引擎顺序，VERA20k emit.rs `theater_name`）：
-   * 0 温带 / 1 雪地 / 2 城市 / 3 沙漠 / 4 新城市；越界回落温带。
-   * 月球不是 RMG 选项（VERA20k 也没有开）。
+   * 0 温带 / 1 雪地 / 2 城市 / 3 沙漠 / 4 新城市；5 月球是本仓库的扩展
+   * （gamemd 的 RMG 选项只到新城市，但 theater 数据层有 LUNAR，引擎读该
+   * theater 时会把悬崖/水域七族清零）。越界回落温带。
    */
   theater?: number;
   mapSize?: number;

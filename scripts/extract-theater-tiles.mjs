@@ -28,6 +28,7 @@ const THEATERS = {
   snow: { ini: 'snowmd.ini', ext: 'sno', mixes: ['isosnomd.mix', 'snowmd.mix', 'isosnow.mix', 'snow.mix', 'sno.mix'], stock: '雪地' },
   urban: { ini: 'urbanmd.ini', ext: 'urb', mixes: ['isourbmd.mix', 'isourb.mix', 'urb.mix', 'urban.mix'], stock: '城市' },
   desert: { ini: 'desertmd.ini', ext: 'des', mixes: ['isodesmd.mix', 'desert.mix', 'des.mix', 'isodes.mix'], stock: '沙漠' },
+  lunar: { ini: 'lunarmd.ini', ext: 'lun', mixes: ['isolunmd.mix', 'isolun.mix', 'lun.mix', 'lunar.mix'], stock: '月球' },
   newurban: { ini: 'urbannmd.ini', ext: 'ubn', mixes: ['isoubnmd.mix', 'isoubn.mix', 'ubn.mix', 'urbann.mix'], stock: '新城市' },
 };
 

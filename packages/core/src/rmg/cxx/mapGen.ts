@@ -52,6 +52,7 @@ import {
     smoothWaterBody,
     loadTheaterTiles,
     isWaterFamilyTile,
+    inTileFamily,
 } from './river';
 import { loadTileCellAttrs, loadOverlayTypes, loadGroundTypes, loadTiberiums } from './recalc';
 import { loadNeutralTechBuildings, loadMultiplayerHouses } from './startpoint';
@@ -590,6 +591,14 @@ export class Rmg {
         this.baseLevel = 4;
         this.usedWaterCells = 0;
         loadTheaterTiles(this, cfg.theater);
+        // A theater whose WaterSet family does not exist (the engine's lunar
+        // reader zeroes WaterSet/ShorePieces/WaterBridge; our table resolves an
+        // empty tileset to -1) has nothing to stamp as water. Drop the rolled
+        // amount here rather than letting the carve stages write tile -1.
+        if (this.waterTileIndex < 0) {
+            this.waterAmount = 0;
+            cfg.waterAmount = 0;
+        }
         loadTileCellAttrs(this, cfg.theater);
         loadOverlayTypes(this);
         loadGroundTypes(this);
@@ -608,11 +617,17 @@ export class Rmg {
     // ---- GenerateTerrain (sub_59A6C0 segments 1-6) ------------------------
     generateTerrain(): void {
         // Segment 1: flood every diamond cell with the water base tile.
+        //
+        // A theater with no water family (lunar: the engine zeroes WaterSet /
+        // ShorePieces / WaterBridge) has no sea to flood, so the base fill falls
+        // back to its ClearTile - the playfield starts as solid ground instead of
+        // carrying tile -1 in every cell the land pass never reaches.
+        const seaTile = this.waterTileIndex >= 0 ? this.waterTileIndex : this.clearTileIndex;
         {
             const it = new CellIterator();
             it.reset(this.cellSlots, this.size.mapWidth);
             for (let cell = it.next(); cell !== null; cell = it.next())
-                cell.isoTileTypeIndex = this.waterTileIndex;
+                cell.isoTileTypeIndex = seaTile;
         }
 
         // Segment 2: land-type dispatch.
@@ -658,7 +673,7 @@ export class Rmg {
             it.reset(this.cellSlots, this.size.mapWidth);
             for (let cell = it.next(); cell !== null; cell = it.next()) {
                 const tile = cell.isoTileTypeIndex;
-                if (tile < this.shorePieces || tile >= this.shorePieces + 42) continue;
+                if (!inTileFamily(this.shorePieces, tile, 42)) continue;
                 for (let facing = 0; facing < 8; facing += 2) {
                     const neighbour = this.getNeighbourCell(cell, facing);
                     if (this.isPlaceholderTile(neighbour)) neighbour.isoTileTypeIndex = this.greenTileIndex;
@@ -1070,8 +1085,7 @@ export class Rmg {
             const it = new CellIterator();
             it.reset(this.cellSlots, this.size.mapWidth);
             for (let cell = it.next(); cell !== null; cell = it.next()) {
-                if (cell.isoTileTypeIndex >= this.shorePieces &&
-                    cell.isoTileTypeIndex < this.shorePieces + 42) {
+                if (inTileFamily(this.shorePieces, cell.isoTileTypeIndex, 42)) {
                     cell.isoTileTypeIndex = 0;
                     cell.height = 0;
                 }
@@ -1196,8 +1210,7 @@ export class Rmg {
     // ---- tile predicates ----------------------------------------------------
     /** sub_485060. */
     isWaterTile(cell: MapCell): boolean {
-        const tile = cell.isoTileTypeIndex;
-        return tile >= this.waterTileIndex && tile < this.waterTileIndex + 14;
+        return inTileFamily(this.waterTileIndex, cell.isoTileTypeIndex, 14);
     }
 
     /** sub_486380. */

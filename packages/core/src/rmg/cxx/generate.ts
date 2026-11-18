@@ -30,7 +30,9 @@ export interface GenerateParams {
     /**
      * Theater option index — the engine's order (VERA20k emit.rs `theater_name`):
      * 0 temperate / 1 snow / 2 urban / 3 desert / 4 newurban. Out of range
-     * resolves to temperate. Lunar is not an RMG option in VERA20k either.
+     * resolves to temperate. 5 (lunar) is this port's extension: the engine's
+     * data layer has LUNAR and zeroes its cliff/water families, but gamemd's
+     * RMG dropdowns never offer it.
      */
     theater: number;
     mapSize: number; // 0..3

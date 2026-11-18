@@ -45,6 +45,7 @@ import { diag, f3, f4, x2 } from './diag';
 import { F2I64, K_UNIT_SCALE, tableAtan } from './mathTables';
 import { atoiPrefix, profileInt, profileString, profileSectionNames } from './winapi';
 import { generateLake } from './lake';
+import { theaterName } from './theater';
 
 export { generateLake };
 
@@ -1540,7 +1541,7 @@ export function tileNeighbourMask(r: Rmg, cell: MapCell, mode: number): number {
 
     if (mode === 1) {
         const tile = cell.isoTileTypeIndex;
-        if (tile >= r.waterTileIndex && tile < r.waterTileIndex + 14)
+        if (inTileFamily(r.waterTileIndex, tile, 14))
             return 0;
     } else if (mode === 0) {
         if (!r.isPlaceholderTile(cell))
@@ -1576,9 +1577,19 @@ export function tileNeighbourMask(r: Rmg, cell: MapCell, mode: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// FloodFill - sub_57A430 - pass 1, recursive flood fill of one water body.
+// FloodFill - sub_57A430 - pass 1, flood fill of one water body.
+//
+// The reference recurses once per cell. That is fine on a temperate map (the
+// body is a narrow channel), but a theater with no water family leaves one
+// open plate the fill spirals through, and 111x111 cells of depth blows the
+// JS stack. The recursion is therefore emulated with an explicit frame stack
+// that keeps the original visit order (each neighbour is entered before the
+// next one is considered), so the fill stays bit-identical where it used to
+// terminate.
 // ---------------------------------------------------------------------------
-export function floodFill(r: Rmg, cell: MapCell, genCode: number, flag: number): boolean {
+
+/** Enter one cell: 0 = keep descending, 1 = stop (true), 2 = stop (polluted). */
+function floodFillEnter(r: Rmg, cell: MapCell, genCode: number, flag: number): number {
     const cx = cell.mapCoords & 0xffff;
     const cy = cell.mapCoords >>> 16;
 
@@ -1588,7 +1599,7 @@ export function floodFill(r: Rmg, cell: MapCell, genCode: number, flag: number):
     // 2. Connectivity mask.
     const mask = tileNeighbourMask(r, cell, 0);
     if (mask <= 0)
-        return true;
+        return 1;
 
     // 3. Fall-back / absorb flag (vanilla v44).
     let fallback = (mask === 11 || mask === 26);
@@ -1624,12 +1635,12 @@ export function floodFill(r: Rmg, cell: MapCell, genCode: number, flag: number):
 
     // 4. Straight-through or absorbed?
     if ((mask & 0x88) !== 0x88 && (mask & 0x22) !== 0x22 && !fallback)
-        return true;
+        return 1;
 
     // 4a. Foreign-water pollution test.
     const owner = r.work.i(r.workIndex(cx, cy), 14);
     if (owner > 0 && owner !== genCode && flag === 0)
-        return false;
+        return 2;
 
     // 4b. Flatten and set the water base tile.
     cell.height = 0;
@@ -1638,18 +1649,44 @@ export function floodFill(r: Rmg, cell: MapCell, genCode: number, flag: number):
     // 4c. Write the generation code (flag ? 0 : genCode).
     r.work.setI(r.workIndex(cx, cy), 14, flag !== 0 ? 0 : genCode);
 
-    // 4d. Recurse into the 8 in-diamond neighbours.
-    for (let facing = 0; facing < 8; ++facing) {
-        const nb = r.getNeighbourCell(cell, facing);
+    // 4d. The caller walks the 8 in-diamond neighbours.
+    return 0;
+}
+
+export function floodFill(r: Rmg, cell: MapCell, genCode: number, flag: number): boolean {
+    const stack: Array<{ cell: MapCell; facing: number }> = [{ cell, facing: -1 }];
+    let polluted = false;
+
+    while (stack.length > 0) {
+        const frame = stack[stack.length - 1]!;
+
+        // -1 = this cell has not been entered yet.
+        if (frame.facing < 0) {
+            frame.facing = 0;
+            const verdict = floodFillEnter(r, frame.cell, genCode, flag);
+            if (stack.length === 1 && verdict === 2)
+                polluted = true;
+            if (verdict !== 0)
+                stack.pop();
+            continue;
+        }
+
+        if (frame.facing >= 8) {
+            stack.pop();
+            continue;
+        }
+
+        const nb = r.getNeighbourCell(frame.cell, frame.facing);
+        frame.facing += 1;
         const nx = nb.mapCoords & 0xffff;
         const ny = nb.mapCoords >>> 16;
         if (!r.cellExists(nx, ny))
             continue;
         r.work.setI(r.workIndex(nx, ny), 16, -1);
-        floodFill(r, nb, genCode, flag);
+        stack.push({ cell: nb, facing: -1 });
     }
 
-    return true;
+    return !polluted;
 }
 
 // ---------------------------------------------------------------------------
@@ -1659,7 +1696,7 @@ export function cleanupTile(r: Rmg, cell: MapCell, genCode: number): number {
     // genCode is only used by the unreachable work data[14] store (dead flag).
 
     const tile = cell.isoTileTypeIndex;
-    if (tile < r.waterTileIndex || tile >= r.waterTileIndex + 12)
+    if (!inTileFamily(r.waterTileIndex, tile, 12))
         return tile;
 
     const code = tileNeighbourMask(r, cell, 2);
@@ -2078,12 +2115,9 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
             }
 
             // 5. Rejection (0x57b774).
-            const existingIsShore =
-                (cell.isoTileTypeIndex >= r.shorePieces &&
-                    cell.isoTileTypeIndex < r.shorePieces + 42);
+            const existingIsShore = inTileFamily(r.shorePieces, cell.isoTileTypeIndex, 42);
             if ((existingIsShore && tileFitsFoundation(families, tile, h)) ||
-                (tile >= r.shorePieces && tile < r.shorePieces + 42 &&
-                    isCliffFamilyCellBases(families, cell))) {
+                (inTileFamily(r.shorePieces, tile, 42) && isCliffFamilyCellBases(families, cell))) {
                 placed.v = false; // 0x57b77d
             }
             return false; // 0x57b6aa
@@ -2234,17 +2268,31 @@ export function buildWaterRing(r: Rmg, genCode: number): number[] {
 // ---------------------------------------------------------------------------
 // IsWaterFamilyTile - sub_4865D0 - water / shore tile family test.
 // ---------------------------------------------------------------------------
+/**
+ * Membership test for a theater tile family.
+ *
+ * A family whose section is missing (or whose `TilesInSet` is 0) resolves to -1
+ * - the `Option<u16>` semantics VERA20k uses. The reference inlines
+ * `tile >= base && tile < base + count`, which under a -1 base degrades into
+ * "every tile belongs to this family" and makes the whole pipeline treat plain
+ * ground as water. Going through this helper keeps the valid-base behaviour
+ * bit-identical and makes an absent family match nothing.
+ */
+export function inTileFamily(base: number, tile: number, count: number): boolean {
+    return base >= 0 && tile >= base && tile < base + count;
+}
+
 export function isWaterFamilyTile(r: Rmg, cell: MapCell | null): boolean {
     if (cell === null)
         return false;
 
     const tile = cell.isoTileTypeIndex;
-    if (tile >= r.shorePieces && tile < r.shorePieces + 42)
+    if (inTileFamily(r.shorePieces, tile, 42))
         return true;
-    if (tile >= r.waterTileIndex && tile < r.waterTileIndex + 14)
+    if (inTileFamily(r.waterTileIndex, tile, 14))
         return true;
     for (let i = 0; i < 4; ++i) {
-        if (tile >= r.waterFamily4Base[i]! && tile < r.waterFamily4Base[i]! + 4)
+        if (inTileFamily(r.waterFamily4Base[i]!, tile, 4))
             return true;
     }
     return false;
@@ -2258,7 +2306,7 @@ export function isShoreTile(r: Rmg, cell: MapCell | null): boolean {
         return false;
 
     const tile = cell.isoTileTypeIndex;
-    return (r.shorePieces >= 0 && tile >= r.shorePieces && tile < r.shorePieces + 42);
+    return inTileFamily(r.shorePieces, tile, 42);
 }
 
 // ---------------------------------------------------------------------------
@@ -2681,4 +2729,23 @@ export function loadTheaterTiles(r: Rmg, theater: number): void {
     r.waterFamily4Base[1] = startOf(westSection);
     r.waterFamily4Base[2] = startOf(southSection);
     r.waterFamily4Base[3] = startOf(northSection);
+
+    // ReadTheater545150 546C95 - LUNAR cuts seven families the moment the
+    // theater is loaded, keeping the rest of the declared ranges. VERA20k
+    // mirrors that with `apply_lunar_global_zeroing` (theater.rs), naming
+    // exactly these keys: CliffSet / WaterCliffs / BridgeSet / WoodBridgeSet
+    // (cliff ranges) and WaterSet / ShorePieces / WaterBridge (RMG tile keys).
+    // lunarmd.ini still *declares* CliffSet=10, WaterSet=21, ShorePieces=12 ...
+    // but their [TileSetNNNN] blocks are empty, so the zeroing and our own
+    // "empty family = -1" rule agree; the explicit clear keeps the engine's
+    // intent visible if a rebalanced lunarmd.ini ever fills those sets in.
+    if (theaterName(theater) === 'LUNAR') {
+        r.shoreTileIndex = -1;      // CliffSet
+        r.waterCliffsIndex = -1;    // WaterCliffs
+        r.bridgeSetIndex = -1;      // BridgeSet
+        r.woodBridgeSetIndex = -1;  // WoodBridgeSet
+        r.waterTileIndex = -1;      // WaterSet
+        r.shorePieces = -1;         // ShorePieces
+        r.waterBridgeIndex = -1;    // WaterBridge
+    }
 }

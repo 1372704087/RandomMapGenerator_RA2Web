@@ -8,10 +8,12 @@
  * (0 Temperate / 1 Snow / 2 Urban / 3 Desert / 4 NewUrban), and it is what
  * `[Map] Theater=` gets written from.
  *
- * Lunar is deliberately absent, exactly as in VERA20k: the theater *data* layer
- * has a Lunar set (with the engine's ReadTheater545150 546C95 lunar zeroing of
- * cliffs / water / bridges), but the RMG option table stops at NewUrban and any
- * index outside it resolves to temperate.
+ * Lunar keeps the engine's data-layer handling: it is *not* one of gamemd's
+ * RMG options, so index 5 is this port's own extension. The engine's theater
+ * reader (ReadTheater545150 546C95) still zeroes its cliff/water families, and
+ * VERA20k mirrors that in `apply_lunar_global_zeroing`; `loadTheaterTiles`
+ * does the same, so a lunar map comes out as flat regolith with ramps /
+ * height pieces / craters and no water or cliffs.
  *
  * Leaf module: no imports, so mapGen/recalc/mapFile can share it without
  * closing an import cycle.
@@ -42,6 +44,13 @@ export const THEATER_TABLE: readonly TheaterEntry[] = [
     { name: 'URBAN', iniName: 'urbanmd.ini', extension: 'urb', artFolder: '城市', artCacheFolder: 'urban' },
     { name: 'DESERT', iniName: 'desertmd.ini', extension: 'des', artFolder: '沙漠', artCacheFolder: 'desert' },
     { name: 'NEWURBAN', iniName: 'urbannmd.ini', extension: 'ubn', artFolder: '新城市', artCacheFolder: 'newurban' },
+    /**
+     * Port-only option: gamemd's RMG dropdowns stop at NewUrban, but the theater
+     * data layer does carry LUNAR (ReadTheater545150 zeroes its cliff/water
+     * families - see `loadTheaterTiles`). Generating on it is therefore this
+     * port's extension, not a recovered engine option.
+     */
+    { name: 'LUNAR', iniName: 'lunarmd.ini', extension: 'lun', artFolder: '月球', artCacheFolder: 'lunar' },
 ];
 
 /** Highest option index the table accepts. */

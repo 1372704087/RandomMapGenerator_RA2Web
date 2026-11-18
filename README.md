@@ -47,7 +47,7 @@ pnpm dev:web
 实测峰值 1.6 GB、耗时 10 s（其中大部分是游戏资源和地图模型本身）。
 `CNCMAPS_MAX_PIXELS`（默认 10 亿）只是拦住真正离谱的尺寸。
 
-### 非温带/雪地的 theater 瓦片（城市 / 沙漠 / 新城市）
+### 非温带/雪地的 theater 瓦片（城市 / 沙漠 / 新城市 / 月球）
 
 原版 MapGenerator 只把 **温和** 和 **雪地** 两套 TMP 解包进 `Tile资源/`；城市、
 沙漠、新城市的 `.urb` / `.des` / `.ubn` 瓦片还在游戏的 theater mix 里。RMG 的
@@ -56,12 +56,37 @@ recalc 要靠每张 TMP 的 Height / RampType 判断「这格有没有这一帧�
 
 ```powershell
 node scripts/extract-theater-tiles.mjs --game-dir 'F:\Red-Alert-2-Yuris-Revenge'
-# 只抽一套：--theater desert / urban / newurban
+# 只抽一套：--theater desert / urban / newurban / lunar
 ```
 
 产物落在 `packages/server/resources/theater-tiles/<theater>/`（游戏素材，已
 gitignore）。`Rmg.artDir()` 优先用游戏 `Tile资源/<theater>`，没有才回落到这个缓存；
 两边都没有时后端会打一条警告并说明怎么抽。
+
+#### 月球（LUNAR，theater index 5）
+
+`lunarmd.ini` 是引擎自带、但原版随机地图从来不用的那一档（YR 的游戏里也调不到）。
+本仓库把它作为扩展档接进来，走的是 VERA20k 的同一套语义：
+
+- 引擎 `ReadTheater` 对 `LUNAR` 会把 `BridgeSet` / `WoodBridgeSet` /
+  `CliffRanges.{CliffSet, WaterCliffs, BridgeSet, WoodBridgeSet}` /
+  `RMGTiles.{WaterSet, ShorePieces, WaterBridge}` 七个全局清零
+  （VERA20k `apply_lunar_global_zeroing`）。我们照做：`loadTheaterTiles` 末尾把
+  这七个族置为 `-1`，也就是「该 theater 没有这一族瓦片」。
+- 族索引为 `-1` 时必须按「不存在」处理，不能用 `tile >= base && tile < base+n`
+  去比较 —— `-1` 比任何瓦片号都小，不设防的话整张地表的瓦片都会落进水域 / 海岸
+  族的区间里（水面 14 个、海岸 42 个、四向瀑布各 4 个），流水线会把平地当成水，
+  `growPatch` 反复失败并把格子回滚成 `tile = -1`。`inTileFamily()` 就是这道闸。
+- 没有水域族 ⇒ 没有水可填：掷出来的 `waterAmount` 归零，`generateTerrain`
+  的基础填充回落到 `ClearTile`（否则每格都盖 `-1`，后续陆地块只覆盖一部分，剩下
+  的空格渲染成黑缝）。
+- 枫叶光照沿用雪地表（`theater != 0` 走 snow lighting），月面偏冷白，与游戏里
+  TS 月面一致。
+- **已知限制**：`lunarmd.ini` 里 `HeightBase`（`hyte01..15`）与 `Mrmfx01..12`
+  是 Tiberian Sun 的高度件，YR 的 `isolun.mix` / `isolunmd.mix` 里根本没打包
+  （逐条探针确认 MISSING）。所以月面在 1 格高度差上偶有几个格子缺「台阶立面的
+  转角件」，预览里表现为极小的黑色 V 形缺口（111×111 的图上约 8 处）。这是原始
+  美术缺失，不是管线 bug；不想看到的话只能让月球图保持单层高度。
 
 ## 项目结构
 
@@ -71,8 +96,8 @@ packages/
   server/    - Express 后端 API
     resources/
       MapUnits/  - 预置地图单元片段（各 theater 地形）
-      theater/   - theater 控制 INI 副本（temperatmd/snowmd/urbanmd/desertmd/urbannmd）
-      theater-tiles/ - 城市/沙漠/新城市的 TMP 瓦片缓存（脚本现抽，gitignore）
+      theater/   - theater 控制 INI 副本（temperatmd/snowmd/urbanmd/desertmd/urbannmd/lunarmd）
+      theater-tiles/ - 城市/沙漠/新城市/月球的 TMP 瓦片缓存（脚本现抽，gitignore）
       rulesmd.ini / artmd.ini - 游戏规则配置
       minimap.ini - 小地图颜色配置
   web/       - React + Vite 前端界面
@@ -81,7 +106,7 @@ packages/
 ## 功能
 
 - 支持 4 种地图主题：沙漠、新城市、温带、温带岛屿
-- vera20k 管线（`/api/rmg/cxx/generate`）额外支持按 theater 表出图：温带 / 雪地 / 城市 / 沙漠 / 新城市（引擎顺序 0..4）
+- vera20k 管线（`/api/rmg/cxx/generate`）额外支持按 theater 表出图：温带 / 雪地 / 城市 / 沙漠 / 新城市 / 月球（引擎顺序 0..4，月球是 5 的扩展档）
 - 可配置地图尺寸、玩家数量、游戏模式
 - 建筑损坏/摧毁设置
 - 污迹密度控制
