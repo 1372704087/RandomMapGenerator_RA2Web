@@ -77,11 +77,12 @@ export function renderCncmapsPreview(
   return job;
 }
 
-/** 标记层允许的最大投影像素数（60px × 30px 一格）。 */
-const MARKER_MAX_PIXELS = 120_000_000;
+/** 标记层允许的最大投影像素数（60px × 30px 一格）。带标记要重画一遍瓦片，超大图靠条带渲染顶着。 */
+const MARKER_MAX_PIXELS = 320_000_000;
 
-/** 允许渲染的最大投影像素数；再大就交给前端退回雷达预览（每像素 5 字节）。 */
-const MAX_PIXELS = Number(process.env.CNCMAPS_MAX_PIXELS ?? 150_000_000);
+/** 允许渲染的最大投影像素数。渲染器在超大图上会按条带分片绘制（每片约 160 MB），
+ * 所以画布本身不再受限；这个上限只是拦住真正离谱的尺寸（单张预览要跑几十秒）。 */
+const MAX_PIXELS = Number(process.env.CNCMAPS_MAX_PIXELS ?? 1_000_000_000);
 
 /** 从 `[Map] Size=x,y,w,h` 估投影像素数；解析不出来就当作小图。 */
 function projectedPixels(mapContent: string): number {
