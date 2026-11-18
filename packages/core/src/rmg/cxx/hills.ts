@@ -39,7 +39,7 @@ import {
 import { F2I64 } from './mathTables';
 import { diag } from './diag';
 import { canHostSlope, isMorphableTile, isCliffFamilyTile } from './makingSub';
-import { cliffCellsInX, isCliffWallRiding, isShoreTile } from './river';
+import { cliffCellsInX, inTileFamily, isCliffWallRiding, isShoreTile } from './river';
 
 // IsMorphableTile / CanHostSlope (MapGenHills.cpp local definitions) live in
 // makingSub.ts - re-exported so this module mirrors the C++ file's exports.
@@ -810,8 +810,7 @@ export function finalizeElevationSlopes(r: Rmg): void {
                 // InvalidCell sentinel), so the vanilla's null check is
                 // vacuous and the sentinel's fields would be tested too.
                 const oq = r.cellAt(i16(x + oDX[sd]), i16(y + oDY[sd]));
-                if (oq.isoTileTypeIndex >= r.shoreTileIndex
-                    && oq.isoTileTypeIndex <= r.shoreTileIndex + 39
+                if (inTileFamily(r.shoreTileIndex, oq.isoTileTypeIndex, 40)
                     && oq.level - newLevel >= 2) {
                     block = true;
                     break;
@@ -821,8 +820,7 @@ export function finalizeElevationSlopes(r: Rmg): void {
                 let sameLevelFoot = false;
                 for (let sd = 0; sd < 4; ++sd) {
                     const sq = r.cellAt(i16(x + oDX[sd]), i16(y + oDY[sd]));
-                    if (sq.isoTileTypeIndex >= r.shoreTileIndex
-                        && sq.isoTileTypeIndex <= r.shoreTileIndex + 39
+                    if (inTileFamily(r.shoreTileIndex, sq.isoTileTypeIndex, 40)
                         && sq.level === newLevel) {
                         sameLevelFoot = true;
                         break;
@@ -943,9 +941,8 @@ export function mergeSlopeBlocks(r: Rmg): void {
                             continue;
                         const aq = r.cellAt(ax, ay);
                         const at = aq.isoTileTypeIndex;
-                        if ((at >= r.cliffRampsIndex && at <= r.cliffRampsIndex + 9)
-                            || (at >= r.shoreTileIndex
-                                && at <= r.shoreTileIndex + 39)) {
+                        if (inTileFamily(r.cliffRampsIndex, at, 10)
+                            || inTileFamily(r.shoreTileIndex, at, 40)) {
                             touchesArt = true;
                             break;
                         }
