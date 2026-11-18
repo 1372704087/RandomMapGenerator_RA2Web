@@ -18,6 +18,8 @@
 export { generateMap as generateCxxMap } from './cxx/generate';
 export type { GenerateParams as CxxGenerateParams } from './cxx/generate';
 export { saveMapFile as saveCxxMapFile } from './cxx/mapFile';
+export { THEATER_TABLE, MAX_THEATER_INDEX, theaterEntry, theaterName } from './cxx/theater';
+export type { TheaterEntry } from './cxx/theater';
 
 // ---- 基础件 ---------------------------------------------------------------
 export * from './x87';

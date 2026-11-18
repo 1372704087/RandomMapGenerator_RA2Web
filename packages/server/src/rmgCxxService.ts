@@ -15,16 +15,39 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { generateCxxMap, CxxGenerateParams } from '@ra2/core';
+import { generateCxxMap, CxxGenerateParams, MAX_THEATER_INDEX, theaterEntry } from '@ra2/core';
 
 /** 默认资源目录：解开的原版 theater INI + TMP 目录 */
 const DEFAULT_RESOURCE_DIR = 'G:/MapGenerator/x64/Release';
+
+/**
+ * theater 控制 INI 的补充目录（temperatmd / snowmd / urbanmd / desertmd /
+ * urbannmd）。原版 exe 从它自己目录和 相关INI 找，这里补一份仓库内的副本，
+ * 这样不需要往 G:/MapGenerator 写东西也能跑沙漠/城市。
+ */
+const THEATER_INI_DIR = path.join(__dirname, '..', 'resources', 'theater');
+
+/**
+ * 非温带/雪地 theater 的 TMP 瓦片缓存（城市 / 沙漠 / 新城市）。
+ *
+ * `Tile资源/` 里只有 温和 和 雪地 —— 原版 MapGenerator 也只放了这两套。
+ * 其余三套的 .urb/.des/.ubn 瓦片躺在游戏的 theater mix 里，由
+ * `scripts/extract-theater-tiles.mjs` 从 `isodesmd.mix` / `isourbmd.mix` /
+ * `isoubnmd.mix` 抽到本目录。没有 TMP 就没有每格的 Height/RampType，
+ * recalc 的「瓦片有没有这一帧」判定会把整张图擦成 0xFFFF（一片空白沙地）。
+ */
+const TILE_ART_DIR = path.join(__dirname, '..', 'resources', 'theater-tiles');
 
 export interface CxxGenerateInput {
   /** 全局种子（exe 的 WinMain 种子里那个；16 个选项由它摇出） */
   globalSeed?: number;
   environment?: number;
   timeOfDay?: number;
+  /**
+   * theater 选项（引擎顺序，VERA20k emit.rs `theater_name`）：
+   * 0 温带 / 1 雪地 / 2 城市 / 3 沙漠 / 4 新城市；越界回落温带。
+   * 月球不是 RMG 选项（VERA20k 也没有开）。
+   */
   theater?: number;
   mapSize?: number;
   oreDensity?: number;
@@ -82,6 +105,22 @@ function clampInt(v: unknown, lo: number, hi: number, fallback: number): number 
   return Math.min(hi, Math.max(lo, n));
 }
 
+/** 城市/沙漠/新城市需要额外的 TMP 瓦片；缺了就要提醒一句，否则整张图会被擦空。 */
+const warnedTheaters = new Set<number>();
+function warnIfTileArtMissing(theater: number, resourceDir: string): void {
+  if (theater < 2 || warnedTheaters.has(theater)) return;
+  const entry = theaterEntry(theater);
+  const installed = path.join(resourceDir, '..', '..', 'Tile资源', entry.artFolder);
+  const cached = path.join(TILE_ART_DIR, entry.artCacheFolder);
+  if (fs.existsSync(installed) || fs.existsSync(cached)) return;
+  warnedTheaters.add(theater);
+  console.warn(
+    `[rmg-cxx] ${entry.name} 缺少 TMP 瓦片（${installed} 与 ${cached} 都不存在）：`
+    + ' 生成的图会被 recalc 擦成 0xFFFF。先跑 '
+    + `node scripts/extract-theater-tiles.mjs --game-dir <游戏目录> --theater ${entry.artCacheFolder}`,
+  );
+}
+
 /** 种子可以是 0x 前缀的十六进制，也可以是十进制 */
 export function parseSeed(v: unknown): number {
   if (typeof v === 'number' && Number.isFinite(v)) return Math.trunc(v) >>> 0;
@@ -105,7 +144,7 @@ export function generateRmgCxx(input: CxxGenerateInput): CxxGenerateResult {
   const params: CxxGenerateParams = {
     environment: clampInt(input.environment, 0, 4, 1),
     timeOfDay: clampInt(input.timeOfDay, 0, 3, 0),
-    theater: clampInt(input.theater, 0, 1, 0),
+    theater: clampInt(input.theater, 0, MAX_THEATER_INDEX, 0),
     mapSize: clampInt(input.mapSize, 0, 3, 1),
     oreDensity: clampInt(input.oreDensity, 0, 3, 0),
     playerIndex: clampInt(input.playerIndex, 0, 6, 2),
@@ -115,13 +154,14 @@ export function generateRmgCxx(input: CxxGenerateInput): CxxGenerateResult {
   };
 
   const resourceDir = resolveResourceDir();
+  warnIfTileArtMissing(params.theater, resourceDir);
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rmg-cxx-'));
   const outPath = path.join(tmpDir, 'out.map');
 
   let result: ReturnType<typeof generateCxxMap>;
   const t0 = Date.now();
   try {
-    result = generateCxxMap(params, outPath, resourceDir);
+    result = generateCxxMap(params, outPath, resourceDir, THEATER_INI_DIR, TILE_ART_DIR);
   } finally {
     // 生成失败时也要清掉临时目录
   }

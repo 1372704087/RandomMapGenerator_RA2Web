@@ -1115,6 +1115,14 @@ export function generateDelta(r: Rmg, genCode: number, startXY: number, endXY: n
                 fillBand(waveY, waveCountY, waveX, waveSpanX);
 
                 // ---- E. Waterfall dressing (0x59eee1 - 0x59ffd4) ----
+                //
+                // VERA20k resolves the four waterfall bases to `Option<u16>`;
+                // a theater whose `Waterfall*` tileset is empty (desertmd.ini
+                // 30/49/50/51 and lunarmd alike) has no family at all, so the
+                // dressing is skipped and the already-filled water band is left
+                // as a plain river mouth. Stamping `family + k` from a borrowed
+                // base would paint the neighbouring family's tiles across the map.
+                if (family >= 0) {
                 const stamp = (x: number, y: number, tileIndex: number, level: number): void => {
                     r.currentBuildingType = tileIndex;
                     setFoundationCenter(r, packXY(i16(x), i16(y)));
@@ -1197,6 +1205,7 @@ export function generateDelta(r: Rmg, genCode: number, startXY: number, endXY: n
                             else { stamp(baseX + 1, baseY - (k + 2), family + 2, level); k += 2; }
                         }
                         break;
+                }
                 }
             }
         }
@@ -2599,16 +2608,27 @@ export function loadTheaterTiles(r: Rmg, theater: number): void {
     }
 
     // Running tile count in section order, up to (excluding) `section`.
+    //
+    // A family only exists when the named `[TileSetNNNN]` is present *and*
+    // declares at least one tile. Theater INIs beyond temperate/snow leave
+    // whole families empty (desertmd.ini: WaterCliffs=15, Waterfall*=30/49/50/51,
+    // WaterCaves=57 ... all carry TilesInSet=0), and the raw running total then
+    // equals the start of the *next* family, which is not that family at all.
+    // VERA20k models every resolved base as `Option<u16>` and its sanity
+    // filters treat a missing/empty set as "no such family" (see
+    // `apply_lunar_global_zeroing`, which zeroes exactly these seven keys),
+    // so an empty family resolves to -1 here as well - never to a borrowed id.
     const startOf = (section: number): number => {
         if (section < 0)
             return -1;
         let cum = 0;
         for (let i = 0; i < sets.length; ++i) {
-            if (sets[i]!.section >= section)
-                break;
-            cum += sets[i]!.tiles;
+            const set = sets[i]!;
+            if (set.section >= section)
+                return set.section === section && set.tiles > 0 ? cum : -1;
+            cum += set.tiles;
         }
-        return cum;
+        return -1;
     };
 
     r.shorePieces = startOf(shoreSection);

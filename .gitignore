@@ -15,3 +15,6 @@ re/out/
 # cncmaps 预览缓存（内容哈希 PNG，按需重建）
 .cache/
 packages/*/.cache/
+
+# 非温带/雪地 theater 的 TMP 瓦片（游戏素材，用 scripts/extract-theater-tiles.mjs 现抽）
+packages/server/resources/theater-tiles/

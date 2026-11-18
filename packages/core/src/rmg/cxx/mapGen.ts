@@ -55,9 +55,16 @@ import {
 } from './river';
 import { loadTileCellAttrs, loadOverlayTypes, loadGroundTypes, loadTiberiums } from './recalc';
 import { loadNeutralTechBuildings, loadMultiplayerHouses } from './startpoint';
+import { theaterEntry } from './theater';
 
 /** kUnitScale re-export for call sites that spell it out. */
 const kUnitScale = K_UNIT_SCALE;
+
+// Theater table lives in its own leaf module (theater.ts) so recalc/mapFile can
+// use it without closing an import cycle; re-exported here for convenience.
+export { theaterEntry, theaterName, THEATER_TABLE, MAX_THEATER_INDEX } from './theater';
+export type { TheaterEntry } from './theater';
+
 
 // Size interpolation tables (players 2-8 -> index 0-6). Source 0x7ED634 etc.
 const K_WMIN = [70, 70, 70, 80, 90, 100, 100];
@@ -353,8 +360,31 @@ export class Rmg {
     /** Where the INIs / tile art live (the exe's folder in the reference). */
     resourceDir: string;
 
-    constructor(resourceDir = 'G:/MapGenerator/x64/Release') {
+    /**
+     * Optional extra folder for the theater control INIs. The reference exe
+     * kept them next to itself / in 相关INI; this lets a host supply its own
+     * copy (e.g. desertmd.ini unpacked from the game mixes).
+     */
+    theaterIniDir: string | null;
+
+    /**
+     * Optional root of the port's own TMP cache (resources/theater-tiles).
+     * `Tile资源/` only carries temperate and snow; urban/desert/newurban tile
+     * art has to be unpacked out of the game's theater mixes, and without its
+     * TMP frames every cell fails the "tile has a frame" test during recalc and
+     * gets wiped to 0xFFFF. `artDir()` prefers the game install and falls back
+     * here.
+     */
+    tileArtDir: string | null;
+
+    constructor(
+        resourceDir = 'G:/MapGenerator/x64/Release',
+        theaterIniDir: string | null = null,
+        tileArtDir: string | null = null,
+    ) {
         this.resourceDir = resourceDir;
+        this.theaterIniDir = theaterIniDir;
+        this.tileArtDir = tileArtDir;
         this.settings.setDefaults();
     }
 
@@ -377,19 +407,33 @@ export class Rmg {
 
     theaterIniPath(theater: number): string | null {
         const d = this.exeDir();
-        const name = theater === 1 ? 'snowmd.ini' : 'temperatmd.ini';
+        const name = theaterEntry(theater).iniName;
         const candidates = [
             join(d, name),
             join(d, `../${name}`),
             join(d, `../../相关INI/${name}`),
+            join(d, `相关INI/${name}`),
         ];
+        if (this.theaterIniDir !== null) {
+            candidates.push(join(this.theaterIniDir.replace(/[\\/]?$/, '/'), name));
+        }
         for (const c of candidates) if (existsSync(c)) return c;
         return null;
     }
 
     artDir(theater: number): string {
-        const d = this.exeDir();
-        return join(d, `../../Tile资源/${theater === 1 ? '雪地' : '温和'}/`);
+        const entry = theaterEntry(theater);
+        const installed = join(this.exeDir(), `../../Tile资源/${entry.artFolder}/`);
+        if (existsSync(installed))
+            return installed;
+        // Stock MapGenerator only unpacks temperate and snow; every other
+        // theater's TMPs come from the port's own extract (see tileArtDir).
+        if (this.tileArtDir !== null) {
+            const cached = join(this.tileArtDir.replace(/[\\/]?$/, '/'), entry.artCacheFolder);
+            if (existsSync(cached))
+                return cached;
+        }
+        return installed;
     }
 
     rmgmdIniPath(): string | null {

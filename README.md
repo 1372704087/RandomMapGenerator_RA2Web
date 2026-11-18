@@ -47,6 +47,22 @@ pnpm dev:web
 实测峰值 1.6 GB、耗时 10 s（其中大部分是游戏资源和地图模型本身）。
 `CNCMAPS_MAX_PIXELS`（默认 10 亿）只是拦住真正离谱的尺寸。
 
+### 非温带/雪地的 theater 瓦片（城市 / 沙漠 / 新城市）
+
+原版 MapGenerator 只把 **温和** 和 **雪地** 两套 TMP 解包进 `Tile资源/`；城市、
+沙漠、新城市的 `.urb` / `.des` / `.ubn` 瓦片还在游戏的 theater mix 里。RMG 的
+recalc 要靠每张 TMP 的 Height / RampType 判断「这格有没有这一帧」，缺 TMP 会把
+整张图擦成 `0xFFFF`（渲染出来是一片没有海岸和边框的沙地），所以先抽一次：
+
+```powershell
+node scripts/extract-theater-tiles.mjs --game-dir 'F:\Red-Alert-2-Yuris-Revenge'
+# 只抽一套：--theater desert / urban / newurban
+```
+
+产物落在 `packages/server/resources/theater-tiles/<theater>/`（游戏素材，已
+gitignore）。`Rmg.artDir()` 优先用游戏 `Tile资源/<theater>`，没有才回落到这个缓存；
+两边都没有时后端会打一条警告并说明怎么抽。
+
 ## 项目结构
 
 ```
@@ -55,6 +71,8 @@ packages/
   server/    - Express 后端 API
     resources/
       MapUnits/  - 预置地图单元片段（各 theater 地形）
+      theater/   - theater 控制 INI 副本（temperatmd/snowmd/urbanmd/desertmd/urbannmd）
+      theater-tiles/ - 城市/沙漠/新城市的 TMP 瓦片缓存（脚本现抽，gitignore）
       rulesmd.ini / artmd.ini - 游戏规则配置
       minimap.ini - 小地图颜色配置
   web/       - React + Vite 前端界面
@@ -63,6 +81,7 @@ packages/
 ## 功能
 
 - 支持 4 种地图主题：沙漠、新城市、温带、温带岛屿
+- vera20k 管线（`/api/rmg/cxx/generate`）额外支持按 theater 表出图：温带 / 雪地 / 城市 / 沙漠 / 新城市（引擎顺序 0..4）
 - 可配置地图尺寸、玩家数量、游戏模式
 - 建筑损坏/摧毁设置
 - 污迹密度控制

@@ -45,6 +45,7 @@ import {
     profileString,
 } from './winapi';
 import type { Rmg } from './mapGen';
+import { theaterEntry } from './theater';
 
 // ---------------------------------------------------------------------------
 // LandType - the 12 floor classes, in the exact order of the engine's string
@@ -372,7 +373,9 @@ export function loadTileCellAttrs(r: Rmg, theater: number): void {
 
     // ---- the theater's art folder ----------------------------------------
     const artDir = r.artDir(theater);
-    const ext = theater === 1 ? 'sno' : 'tem';
+    // Extension comes from the theater table (VERA20k THEATER_DEFS), so desert
+    // reads clear01.des and lunar would read .lun instead of .tem.
+    const ext = theaterEntry(theater).extension;
 
     // ---- one TMP per tile -------------------------------------------------
     let running = 0;

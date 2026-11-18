@@ -27,7 +27,12 @@ export interface GenerateParams {
     /** UI combo indices (WinMain MapGenParams). */
     environment: number; // 0..4 -> LandType
     timeOfDay: number; // 0..3
-    theater: number; // 0 temperate / 1 snow
+    /**
+     * Theater option index — the engine's order (VERA20k emit.rs `theater_name`):
+     * 0 temperate / 1 snow / 2 urban / 3 desert / 4 newurban. Out of range
+     * resolves to temperate. Lunar is not an RMG option in VERA20k either.
+     */
+    theater: number;
     mapSize: number; // 0..3
     oreDensity: number; // 0..3
     playerIndex: number; // 0 -> 2 players .. 6 -> 8
@@ -62,8 +67,10 @@ export function generateMap(
     params: GenerateParams,
     outPath: string | null,
     resourceDir?: string,
+    theaterIniDir?: string | null,
+    tileArtDir?: string | null,
 ): { rmg: Rmg; result: GenerateResult } {
-    const rmg = new Rmg(resourceDir);
+    const rmg = new Rmg(resourceDir, theaterIniDir ?? null, tileArtDir ?? null);
 
     const cfg: MapGenConfig = {
         landType: envToLandType(params.environment),

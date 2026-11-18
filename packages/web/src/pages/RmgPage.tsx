@@ -18,7 +18,7 @@ export default function RmgPage() {
   const [size, setSize] = useState(1); // 尺寸档 0..3
   const [players, setPlayers] = useState(2); // playerIndex：0 → 2 人 … 6 → 8 人
   const [ore, setOre] = useState(1); // 矿密度 0..3
-  const [theater, setTheater] = useState(0); // 0 温带 / 1 雪地
+  const [theater, setTheater] = useState(0); // 0 温带 / 1 雪地 / 2 城市 / 3 沙漠 / 4 新城市
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [result, setResult] = useState<CxxGenerateResult | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -108,6 +108,9 @@ export default function RmgPage() {
             <select id="theater" value={theater} onChange={(e) => setTheater(+e.target.value)}>
               <option value={0}>温带 TEMPERATE</option>
               <option value={1}>雪地 SNOW</option>
+              <option value={2}>城市 URBAN</option>
+              <option value={3}>沙漠 DESERT</option>
+              <option value={4}>新城市 NEWURBAN</option>
             </select>
           </div>
           <div className="field">
