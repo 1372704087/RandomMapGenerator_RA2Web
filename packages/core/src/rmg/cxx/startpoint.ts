@@ -547,14 +547,21 @@ export function fillZoneFromRow(r: Rmg, row: { index: number }, zone: number, ou
 // urbanPresence, accessibility, regionSize, [this[21] = 20*this[16] no draw],
 // tiberiumLayout, vegetation) and finally seed04C.
 // ---------------------------------------------------------------------------
+// Per-map-type ranges, straight from vera20k `rmg/randomize.rs`:
+//   WATER_MIN/MAX, RUGGEDNESS_MIN/MAX, URBAN_MIN/MAX, ACCESSIBILITY_MIN/MAX,
+//   REGION_SIZE_MIN/MAX. Buckets are 0 群岛 / 1 大陆 / 2 队伍大陆 / 3 内陆 / 4 山地。
+// [20K-MATCH 2026-11-18] 2026-10-01 那份 "user request" 调过的表已废弃：
+// 它与原版有 3 处不符（urban 上限、accessibility 上下限）。
 const K_WATER_LO = [75, 0, 50, 0, 0];
 const K_WATER_HI = [100, 25, 100, 100, 100];
-const K_024_HI = [100, 100, 100, 0, 20];
-// Tuned 2026-10-01 (user request) - non-cliff types 0/1/2 stay vanilla.
-const K_027_LO = [0, 0, 0, 35, 30];
-const K_027_HI = [100, 100, 100, 100, 55];
-const K_028_LO = [50, 0, 35, 0, 0];
-const K_028_HI = [100, 100, 100, 100, 50];
+const K_RUGGED_LO = 20;                 // 五个桶都是 20
+const K_RUGGED_HI = 100;                // 五个桶都是 100
+const K_024_LO = [0, 0, 0, 0, 0];        // URBAN_MIN
+const K_024_HI = [50, 100, 100, 100, 0]; // URBAN_MAX
+const K_027_LO = [0, 0, 0, 0, 0];        // ACCESSIBILITY_MIN（原版全 0）
+const K_027_HI = [100, 100, 100, 100, 20]; // ACCESSIBILITY_MAX（山地桶只有 20）
+const K_028_LO = [50, 0, 35, 0, 0];      // REGION_SIZE_MIN
+const K_028_HI = [100, 100, 100, 100, 50]; // REGION_SIZE_MAX
 
 export function rollGlobalOptions(r: Rmg, seed: number): GlobalMapOptions {
     r.globalRng.seed(seed);
@@ -587,8 +594,9 @@ export function rollGlobalOptions(r: Rmg, seed: number): GlobalMapOptions {
 
     opt.waterAmount = r.globalRng.randomRanged(K_WATER_LO[index]!,
                                                K_WATER_HI[index]!);   // 0x597282
-    opt.ruggedness = r.globalRng.randomRanged(20, 100);               // 0x59729f
-    opt.urbanPresence = r.globalRng.randomRanged(0, K_024_HI[index]!); // 0x5972bc
+    opt.ruggedness = r.globalRng.randomRanged(K_RUGGED_LO, K_RUGGED_HI);  // 0x59729f
+    opt.urbanPresence = r.globalRng.randomRanged(K_024_LO[index]!,
+                                                 K_024_HI[index]!);   // 0x5972bc
     opt.accessibility = r.globalRng.randomRanged(K_027_LO[index]!,
                                                  K_027_HI[index]!);   // 0x5972d9
     opt.regionSize = r.globalRng.randomRanged(K_028_LO[index]!,

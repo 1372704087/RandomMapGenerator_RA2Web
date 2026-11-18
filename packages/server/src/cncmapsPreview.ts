@@ -20,13 +20,18 @@ export class CncmapsPreviewError extends Error {
 
 let renderChain: Promise<unknown> = Promise.resolve();
 
-/** 串行渲染，返回预览 PNG 字节。 */
+/** 串行渲染，返回预览 PNG 字节。
+ *
+ * 起点/矿标记是可选叠加层：cncmaps 在遇到无效起点索引时会直接抛错退出
+ * （`TileLayer.getTile` 拿到 undefined）。所以先带标记渲染，失败就退回不带标记
+ * 重渲一次——地图本体能出图，比因为一层记号整张图 502 好。
+ */
 export function renderCncmapsPreview(
   mapContent: string,
   name: string,
   previewWidth = 1600,
 ): Promise<Buffer> {
-  const job = renderChain.then(() => doRender(mapContent, name, previewWidth));
+  const job = renderChain.then(() => doRender(mapContent, name, previewWidth, true));
   renderChain = job.then(
     () => undefined,
     () => undefined,
@@ -34,7 +39,33 @@ export function renderCncmapsPreview(
   return job;
 }
 
-async function doRender(mapContent: string, name: string, previewWidth: number): Promise<Buffer> {
+async function doRender(
+  mapContent: string,
+  name: string,
+  previewWidth: number,
+  withMarkers: boolean,
+): Promise<Buffer> {
+  try {
+    return await doRenderOnce(mapContent, name, previewWidth, withMarkers);
+  } catch (err) {
+    if (withMarkers && !(err instanceof CncmapsPreviewError && err.statusCode === 503)) {
+      // 标记层炸了（多半是起点索引无效）→ 去掉标记再来一次
+      try {
+        return await doRenderOnce(mapContent, name, previewWidth, false);
+      } catch (err2) {
+        throw err2;
+      }
+    }
+    throw err;
+  }
+}
+
+async function doRenderOnce(
+  mapContent: string,
+  name: string,
+  previewWidth: number,
+  withMarkers: boolean,
+): Promise<Buffer> {
   const fileName = `${safeFileName(name)}.yrm`;
   const width = Math.min(2048, Math.max(400, Math.round(previewWidth)));
 
@@ -70,8 +101,8 @@ async function doRender(mapContent: string, name: string, previewWidth: number):
         format: 'png',
         engine: 'yr',
         sizeMode: 'auto',
-        markStartPos: true,
-        markOre: true,
+        markStartPos: withMarkers,
+        markOre: withMarkers,
         previewWidth: width,
       }),
       signal: AbortSignal.timeout(PREVIEW_TIMEOUT_MS),

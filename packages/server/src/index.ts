@@ -8,12 +8,8 @@
  *   POST /api/generate           - 生成地图，返回 .yrm 文件
  *   POST /api/split              - 把完整地图拆解成若干 .map 切片（默认自动识别 theater）
  *   POST /api/split/detect       - 只识别地图的 theater，不拆解
+ *   POST /api/split/spawns       - 只切出生点（每个 Waypoint 一个居中 spawn 单元）
  *   POST /api/preview            - 地图雷达预览（RGB，支持批量）
- *   GET  /api/rmg/meta           - RMG 选项元数据 / 默认值 / 阶段状态
- *   POST /api/rmg/derive         - RMG 选项 clamp + 尺寸推导
- *   POST /api/rmg/sed/read       - 读 .SED 还原 RMG 选项（carry-default）
- *   POST /api/rmg/sed/write      - RMG 选项写出 .SED
- *   POST /api/rmg/generate       - 跑 RMG 管线产出地图（当前为 S1 骨架）
  *
  * 服务器启动时加载所有资源到内存（loadAllResources）。
  */
@@ -29,17 +25,9 @@ import {
   getGlobalResources,
 } from './resourceLoader';
 import { generateMap } from './generator';
-import { splitFullMap, detectTheater, buildTheaterWarnings } from './splitter';
+import { splitFullMap, splitSpawnUnitsForTheater, detectTheater, buildTheaterWarnings } from './splitter';
 import { renderMapPreview } from '@ra2/core';
-import {
-  getRmgMeta,
-  deriveRmgOptions,
-  readSedOptions,
-  writeSedOptions,
-  generateRmgMap,
-  RmgFillMode,
-} from './rmgService';
-import { generateRmgFull } from './rmgFullService';
+import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
 import { GenerateOptions } from './types';
 
@@ -313,97 +301,94 @@ app.post(
   },
 );
 
-// ---------------------------------------------------------------------------
-// RMG 路由（gamemd 精确管线，见 rmgService.ts 头部说明）
-// ---------------------------------------------------------------------------
-
 /**
- * GET /api/rmg/meta
- * 返回 RMG 选项字段元数据、构造器默认值、RMGMD 缺省、以及阶段实现状态。
- */
-app.get('/api/rmg/meta', (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    res.json(getRmgMeta());
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * POST /api/rmg/derive
- * 请求体: { options: RmgOptions, clamp?: boolean }
- * 响应: { options, derived }
+ * POST /api/split/spawns
+ * 只切出生点：以源图每个 Waypoint 为中心切一个单元，每张只带一个出生点。
  *
- * clamp 默认 true（等价原生 ClampFields 0x005975E0）；传 false 可看原始值。
+ * 请求体: { mapContent, autoTheater?, theaterType? }
+ * 响应: { theater, theaterDir, theaterSource, unitSize, count, spawns: [
+ *   { name, content, x, y, partial } ] }
  */
-app.post('/api/rmg/derive', (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { options, clamp } = req.body as { options?: unknown; clamp?: boolean };
-    res.json(deriveRmgOptions(options, clamp !== false));
-  } catch (err) {
-    next(err);
-  }
-});
+app.post(
+  '/api/split/spawns',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { theaterType, mapContent, autoTheater } = req.body as {
+        theaterType?: string;
+        mapContent?: string;
+        autoTheater?: boolean;
+      };
 
-/**
- * POST /api/rmg/sed/read
- * 请求体: { content: string, base?: RmgOptions }
- * 响应: { options, derived, sectionFound, ignoredKeys }
- *
- * carry-default 语义：缺失/读失败的键保留 base（缺省为构造器默认）。
- * 与原生 reader 一致，**不** 调用 ClampFields。
- */
-app.post('/api/rmg/sed/read', (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { content, base } = req.body as { content?: string; base?: unknown };
-    if (typeof content !== 'string') {
-      res.status(400).json({ error: 'content is required and must be a string' });
-      return;
+      if (!mapContent || typeof mapContent !== 'string' || mapContent.trim().length === 0) {
+        res.status(400).json({ error: 'mapContent is required and must be a non-empty string' });
+        return;
+      }
+
+      const auto = autoTheater !== false;
+      const detection = detectTheater(mapContent);
+
+      let effectiveDir: string | null = null;
+      let source: 'auto' | 'manual';
+      if (auto && detection.dir) {
+        effectiveDir = detection.dir;
+        source = 'auto';
+      } else if (typeof theaterType === 'string' && theaterType.length > 0) {
+        effectiveDir = theaterType;
+        source = 'manual';
+      } else {
+        res.status(400).json({
+          error:
+            detection.engineTheater
+              ? `地图的 Theater=${detection.engineTheater} 在本仓库没有对应地形目录` +
+                `（可用：${detection.available.join(' / ')}），请手动指定 theaterType。`
+              : '无法从地图内容识别地图类型，请提供 theaterType。',
+          available: detection.available,
+        });
+        return;
+      }
+
+      const theater = getTheaterResources(effectiveDir);
+      if (!theater) {
+        const available = getTheaterInfoList().map((t) => t.name);
+        res.status(404).json({
+          error: `Theater "${effectiveDir}" not found`,
+          available,
+        });
+        return;
+      }
+
+      const spawns = splitSpawnUnitsForTheater(effectiveDir, mapContent);
+
+      res.json({
+        theater: theater.theaterEnum,
+        theaterDir: effectiveDir,
+        theaterSource: source,
+        detectedTheater: detection.engineTheater,
+        detectedTheaterDir: detection.dir,
+        warnings: buildTheaterWarnings(detection, effectiveDir, source),
+        unitSize: theater.mapUnitSize,
+        count: spawns.length,
+        spawns,
+      });
+    } catch (err) {
+      next(err);
     }
-    res.json(readSedOptions(content, base));
-  } catch (err) {
-    next(err);
-  }
-});
+  },
+);
 
 /**
- * POST /api/rmg/sed/write
- * 请求体: { options: RmgOptions }
- * 响应: { content, options }
- */
-app.post('/api/rmg/sed/write', (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { options } = req.body as { options?: unknown };
-    res.json(writeSedOptions(options));
-  } catch (err) {
-    next(err);
-  }
-});
-
-/**
- * POST /api/rmg/generate
- * 请求体: { options: RmgOptions, fill?: 'unassigned'|'clear', name?: string, withPreview?: boolean }
- * 响应: JSON，含 mapContent（完整地图 INI 文本）与阶段状态清单。
+ * POST /api/rmg/cxx/generate
+ * 请求体: { globalSeed, environment?, timeOfDay?, theater?, mapSize?,
+ *          oreDensity?, playerIndex?, gameType?, name? }
+ * 响应:   { mapContent, fileName, width, height, waterAmount, cellCount,
+ *          elapsedMs, globalSeed, options }
  *
- * ⚠ 当前实现边界：管线只有阶段 0/1/2 落地，产出为 S1（map-prep）骨架。
- *   响应里的 `outputLevel` / `missing` / `stages` 如实说明缺口，前端须原样展示。
+ * 跑的是 `core/src/rmg/cxx/`（vera20k 逐函数平移的 gamemd 管线）：
+ * 16 个 MAPSEEDCLASS 字段由 globalSeed 摇出，`options` 里原样回给前端展示。
  */
-app.post('/api/rmg/generate', (req: Request, res: Response, next: NextFunction) => {
+app.post('/api/rmg/cxx/generate', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { options, fill, name, withPreview, mode, extension } = req.body as {
-      options?: unknown;
-      fill?: RmgFillMode;
-      name?: string;
-      withPreview?: boolean;
-      mode?: 'full' | 'skeleton';
-      extension?: 'map' | 'yrm';
-    };
-    // full = gamemd 精确管线（MapType 0/1/2 完整地形）；skeleton = 旧 S1 骨架
-    if (mode === 'skeleton') {
-      res.json(generateRmgMap({ options, fill, name, withPreview }));
-      return;
-    }
-    res.json(generateRmgFull({ options, fill, name, withPreview, extension }));
+    res.json(generateRmgCxx(req.body as Parameters<typeof generateRmgCxx>[0]));
   } catch (err) {
     next(err);
   }
@@ -419,10 +404,11 @@ app.post('/api/rmg/generate', (req: Request, res: Response, next: NextFunction) 
  */
 app.post('/api/preview', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { contents, cropEmpty, transparentEmpty } = req.body as {
+    const { contents, cropEmpty, transparentEmpty, mapUnitWindow } = req.body as {
       contents?: unknown;
       cropEmpty?: unknown;
       transparentEmpty?: unknown;
+      mapUnitWindow?: unknown;
     };
     if (
       !Array.isArray(contents) ||
@@ -439,7 +425,7 @@ app.post('/api/preview', (req: Request, res: Response, next: NextFunction) => {
       const p = renderMapPreview(c, minimapContent, theater, {
         cropEmpty: cropEmpty === true,
         transparentEmpty: transparentEmpty === true,
-        mapUnitWindow: cropEmpty === true,
+        mapUnitWindow: mapUnitWindow === true || cropEmpty === true,
       });
       return {
         width: p.width,
@@ -688,11 +674,8 @@ function start(): void {
     console.log('  POST /api/generate           - Generate map');
     console.log('  POST /api/split              - Split map into slices (auto-detects theater)');
     console.log('  POST /api/split/detect       - Detect map theater only');
-    console.log('  GET  /api/rmg/meta           - RMG option metadata / defaults / stages');
-    console.log('  POST /api/rmg/derive         - RMG clamp + size derivation');
-    console.log('  POST /api/rmg/sed/read       - Read .SED into RMG options');
-    console.log('  POST /api/rmg/sed/write      - Write RMG options into .SED');
-    console.log('  POST /api/rmg/generate       - Run RMG pipeline (currently S1 skeleton)');
+    console.log('  POST /api/split/spawns       - Cut spawn units centered on each waypoint');
+    console.log('  POST /api/rmg/cxx/generate   - Random map from one seed (vera20k-aligned cxx pipeline)');
   });
 }
 

@@ -5,11 +5,8 @@
  *   GET  /api/theaters            可用 theater 列表
  *   POST /api/generate            随机地图生成（预置地块拼装范式）
  *   POST /api/split               完整地图 → 若干 .map 切片
- *   GET  /api/rmg/meta            RMG 选项元数据 / 默认值 / 阶段状态
- *   POST /api/rmg/derive          RMG clamp + 尺寸推导
- *   POST /api/rmg/sed/read        读 .SED 还原 RMG 选项
- *   POST /api/rmg/sed/write       RMG 选项写出 .SED
- *   POST /api/rmg/generate        跑 RMG 管线产出地图
+ *   POST /api/rmg/cxx/generate    一个种子 → 完整随机地图（vera20k 对齐的 cxx 管线）
+ *   POST /api/cncmaps-preview     地图文本 → cncmaps 全分辨率预览 PNG
  */
 
 // ============== 通用 ==============
@@ -44,9 +41,8 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** 触发浏览器下载一段文本 */
-export function downloadText(filename: string, content: string, mime = 'application/octet-stream'): void {
-  const blob = new Blob([content], { type: mime });
+/** 触发浏览器下载一个 Blob */
+export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -55,6 +51,11 @@ export function downloadText(filename: string, content: string, mime = 'applicat
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 触发浏览器下载一段文本 */
+export function downloadText(filename: string, content: string, mime = 'application/octet-stream'): void {
+  downloadBlob(filename, new Blob([content], { type: mime }));
 }
 
 // ============== 预览 ==============
@@ -71,7 +72,7 @@ export interface MapPreviewData {
 /** 批量渲染雷达预览（minimap.ini 配色 + 覆盖物/地形/建筑 + 高度明暗） */
 export function fetchMapPreviews(
   contents: string[],
-  options?: { cropEmpty?: boolean; transparentEmpty?: boolean },
+  options?: { cropEmpty?: boolean; transparentEmpty?: boolean; mapUnitWindow?: boolean },
 ): Promise<MapPreviewData[]> {
   return postJson<{ items: MapPreviewData[] }>('/api/preview', {
     contents,
@@ -151,6 +152,27 @@ export interface MapSplitSlice {
   content: string;
 }
 
+/** 以出生点为中心切出的独立 spawn 单元 */
+export interface MapSpawnUnit {
+  name: string;
+  content: string;
+  x: number;
+  y: number;
+  partial: boolean;
+}
+
+export interface SplitSpawnResult {
+  theater: string;
+  theaterDir: string;
+  theaterSource: 'auto' | 'manual';
+  detectedTheater: string | null;
+  detectedTheaterDir: string | null;
+  warnings: string[];
+  unitSize: string;
+  count: number;
+  spawns: MapSpawnUnit[];
+}
+
 /** 地图 theater 识别结果（`POST /api/split/detect`） */
 export interface TheaterDetection {
   /** 地图里读到的引擎 theater 名（如 TEMPERATE）；没读到为 null */
@@ -213,146 +235,58 @@ export function splitMap(payload: {
   return postJson<SplitResult>('/api/split', payload);
 }
 
+/** 只切出生点：以每个 Waypoint 为中心切单元，每个文件只带一个出生点。 */
+export function splitSpawnUnits(payload: {
+  mapContent: string;
+  autoTheater?: boolean;
+  theaterType?: string;
+}): Promise<SplitSpawnResult> {
+  return postJson<SplitSpawnResult>('/api/split/spawns', payload);
+}
+
 // ============== RMG ==============
 
-/** RMG 的 16 个整数选项（顺序即 MapSeedClass 内存偏移顺序） */
-export interface RmgOptions {
-  theater: number;
-  mapType: number;
-  resources: number;
-  ruggedness: number;
-  time: number;
-  waterAmount: number;
-  numPlayers: number;
-  tiberium: number;
-  tiberiumLayout: number;
-  vegetation: number;
-  urbanPresence: number;
+/** cxx 管线（vera20k 逐函数平移）的生成结果 */
+export interface CxxGenerateResult {
+  mapContent: string;
+  fileName: string;
   width: number;
   height: number;
-  accessibility: number;
-  regionSize: number;
-  seed: number;
-  description?: string;
-}
-
-export type RmgOptionsPatch = Partial<RmgOptions>;
-
-export interface RmgChoice {
-  value: number;
-  label: string;
-}
-
-export interface RmgFieldMeta {
-  key: keyof RmgOptions & string;
-  label: string;
-  hint: string;
-  kind: 'range' | 'select';
-  min: number;
-  max: number;
-  clamped: boolean;
-  choices: RmgChoice[] | null;
-}
-
-export interface RmgStageStatus {
-  id: number;
-  name: string;
-  native: string;
-  draws: string;
-  implemented: boolean;
-}
-
-export interface RmgRmgmdSettings {
-  minTiberium: number;
-  maxTiberium: number;
-  maxTrees: number;
-  levelLight: number[];
-  vegetationMin: number[];
-  vegetationMax: number[];
-  temperateAmbientLight: number[];
-  snowAmbientLight: number[];
-  [key: string]: unknown;
-}
-
-export interface RmgMeta {
-  fields: RmgFieldMeta[];
-  defaults: RmgOptions;
-  rmgmdDefaults: RmgRmgmdSettings;
-  stages: RmgStageStatus[];
-  terrainStagesImplemented: boolean;
-  notes: string[];
-}
-
-export interface DerivedDimensions {
-  genW: number;
-  genH: number;
-  mapW: number;
-  mapH: number;
-  localSize: [number, number, number, number];
-  diamondMin: number;
-  diamondMax: number;
-  linearMapWidth: number;
-  cells: number;
-  rawScaleW: number;
-  rawScaleH: number;
-}
-
-export interface RmgDeriveResult {
-  options: RmgOptions;
-  derived: DerivedDimensions;
-}
-
-export interface RmgSedReadResult extends RmgDeriveResult {
-  sectionFound: boolean;
-  ignoredKeys: string[];
-}
-
-export interface RmgGenerateResult extends RmgDeriveResult {
-  fileName: string;
-  mapContent: string;
-  stages: RmgStageStatus[];
-  terrainStagesImplemented: boolean;
-  outputLevel: string;
-  missing: string[];
-  applied: {
-    fill: 'unassigned' | 'clear';
-    bottomSpace: number;
-    withPreview: boolean;
-    bounds: { arraySize: number; packCells: number };
+  waterAmount: number;
+  cellCount: number;
+  elapsedMs: number;
+  globalSeed: number;
+  options: {
+    waterAmount: number;
+    ruggedness: number;
+    urbanPresence: number;
+    accessibility: number;
+    regionSize: number;
+    tiberiumLayout: number;
+    vegetation: number;
+    seed04C: number;
+    environment: number;
+    timeOfDay: number;
+    theater: number;
+    mapSize: number;
+    oreDensity: number;
+    playerCount: number;
+    multiplayer: boolean;
   };
-  rmgmd: RmgRmgmdSettings;
-  /** 完整管线附加（mode:'full' 时返回） */
-  width?: number;
-  height?: number;
-  stats?: { waypoints: number; ores: number; terrain: number; structures: number };
-  elapsedMs?: number;
 }
 
-export async function fetchRmgMeta(): Promise<RmgMeta> {
-  const res = await fetch('/api/rmg/meta');
-  if (!res.ok) throw new Error(`获取 RMG 元数据失败: ${res.status}`);
-  return (await res.json()) as RmgMeta;
+/** 用一个种子跑 cxx 管线（16 个 MAPSEEDCLASS 字段由种子摇出，作为结果返回） */
+export function generateRmgCxx(payload: {
+  globalSeed: string | number;
+  environment?: number;
+  timeOfDay?: number;
+  theater?: number;
+  mapSize?: number;
+  oreDensity?: number;
+  playerIndex?: number;
+  gameType?: number;
+  name?: string;
+}): Promise<CxxGenerateResult> {
+  return postJson<CxxGenerateResult>('/api/rmg/cxx/generate', payload);
 }
 
-export function deriveRmg(options: RmgOptionsPatch, clamp = true): Promise<RmgDeriveResult> {
-  return postJson<RmgDeriveResult>('/api/rmg/derive', { options, clamp });
-}
-
-export function readSed(content: string, base?: RmgOptionsPatch): Promise<RmgSedReadResult> {
-  return postJson<RmgSedReadResult>('/api/rmg/sed/read', { content, base });
-}
-
-export function writeSed(options: RmgOptionsPatch): Promise<{ content: string; options: RmgOptions }> {
-  return postJson<{ content: string; options: RmgOptions }>('/api/rmg/sed/write', { options });
-}
-
-export function generateRmg(payload: {
-  options: RmgOptionsPatch;
-  fill: 'unassigned' | 'clear';
-  name: string;
-  withPreview?: boolean;
-  /** full = gamemd 精确管线（默认）；skeleton = 旧 S1 骨架 */
-  mode?: 'full' | 'skeleton';
-}): Promise<RmgGenerateResult> {
-  return postJson<RmgGenerateResult>('/api/rmg/generate', { mode: 'full', ...payload });
-}
