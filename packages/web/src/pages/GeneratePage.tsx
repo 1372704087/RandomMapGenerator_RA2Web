@@ -49,6 +49,7 @@ const DIRECTION_LABELS: Record<Direction, string> = {
 const THEATER_LABELS: Record<string, string> = {
   DESERT: '沙漠 DESERT',
   NEWURBAN: '新城市 NEWURBAN',
+  SNOW: '雪地 SNOW',
   TEMPERATE: '温带 TEMPERATE',
   TEMPERATE_Islands: '温带岛屿 TEMPERATE_Islands'
 };
@@ -330,13 +331,16 @@ export default function GeneratePage() {
     setCncmapsLightbox(false);
   }
 
-  async function startCncmapsPreview(mapText: string, name: string) {
+  async function startCncmapsPreview(
+    target: string | { mapKey: string },
+    name: string,
+  ) {
     const seq = ++cncmapsSeq.current;
     clearCncmapsPreview();
     setCncmapsStatus('loading');
     setCncmapsError(null);
     try {
-      const blob = await fetchCncmapsPreview(mapText, name, 1600);
+      const blob = await fetchCncmapsPreview(target, name, 1600);
       if (seq !== cncmapsSeq.current) return;
       const url = URL.createObjectURL(blob);
       cncmapsUrlRef.current = url;
@@ -345,7 +349,14 @@ export default function GeneratePage() {
     } catch (e) {
       if (seq !== cncmapsSeq.current) return;
       setCncmapsStatus('error');
-      setCncmapsError(e instanceof Error ? e.message : String(e));
+      const status = (e as Error & { status?: number }).status;
+      setCncmapsError(
+        status === 413
+          ? '地图太大，已跳过实景渲染（上方雷达预览仍可用）'
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
     }
   }
 
@@ -428,7 +439,9 @@ export default function GeneratePage() {
         .catch(() => setGenPreview(null));
 
       setStatus({ kind: 'success', message: `地图已生成: ${filename}` });
-      void startCncmapsPreview(mapText, filename);
+      // 后端把地图原文留在内存里并回了 X-Map-Key：预览凭 key 取，不必重传整张图
+      const mapKey = res.headers.get('X-Map-Key');
+      void startCncmapsPreview(mapKey ? { mapKey } : mapText, filename);
     } catch (e) {
       setStatus({
         kind: 'error',

@@ -22,10 +22,12 @@ export default function RmgPage() {
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [result, setResult] = useState<CxxGenerateResult | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [previewNote, setPreviewNote] = useState<string | null>(null);
 
   async function handleGenerate() {
     setStatus({ kind: 'loading' });
     setResult(null);
+    setPreviewNote(null);
     if (preview) {
       URL.revokeObjectURL(preview);
       setPreview(null);
@@ -44,12 +46,19 @@ export default function RmgPage() {
         kind: 'success',
         message: `产出 ${res.fileName} · ${res.width}×${res.height} · ${res.elapsedMs} ms`,
       });
-      // cncmaps 全分辨率预览（真贴图，含悬崖立面）
+      // cncmaps 全分辨率预览（真贴图，含悬崖立面）；用 mapKey 免重传地图文本
       try {
-        const blob = await fetchCncmapsPreview(res.mapContent, res.fileName, 1600);
+        const blob = await fetchCncmapsPreview(
+          res.mapKey ? { mapKey: res.mapKey } : res.mapContent,
+          res.fileName,
+          1600,
+        );
         setPreview(URL.createObjectURL(blob));
-      } catch {
-        // 预览失败不影响地图产出
+      } catch (err) {
+        const status = (err as Error & { status?: number }).status;
+        if (status === 413) {
+          setPreviewNote('地图过大，已跳过实景预览（雷达预览与下载不受影响）');
+        }
       }
     } catch (err) {
       setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -183,6 +192,7 @@ export default function RmgPage() {
                 <div className="field-hint">cncmaps 全分辨率渲染（真贴图，含悬崖立面）</div>
               </div>
             )}
+            {previewNote && <div className="field-hint" style={{ marginTop: 8 }}>{previewNote}</div>}
           </>
         )}
       </section>

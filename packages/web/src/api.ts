@@ -80,22 +80,33 @@ export function fetchMapPreviews(
   }).then((r) => r.items);
 }
 
-/** cncmaps 渲染预览（PNG blob，默认 1600px 宽）。 */
+/**
+ * cncmaps 渲染预览（PNG blob，默认 1600px 宽）。
+ *
+ * 优先传 `{ mapKey }`（生成接口回的内容哈希），服务端自己取回地图原文，
+ * 前端就不用再把几 MB 的地图文本重传一遍；key 失效时再退回 `mapContent`。
+ */
 export async function fetchCncmapsPreview(
-  mapContent: string,
+  target: string | { mapKey?: string | null; mapContent?: string },
   name: string,
   width = 1600,
 ): Promise<Blob> {
+  const body =
+    typeof target === 'string'
+      ? { mapContent: target, name, width }
+      : { ...target, name, width };
   const res = await fetch('/api/cncmaps-preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mapContent, name, width }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const detail = await readErrorText(res);
-    throw new Error(
+    const err = new Error(
       detail ? `${detail} (HTTP ${res.status})` : `cncmaps 预览失败 (HTTP ${res.status})`,
     );
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
   }
   return await res.blob();
 }
@@ -250,6 +261,8 @@ export function splitSpawnUnits(payload: {
 export interface CxxGenerateResult {
   mapContent: string;
   fileName: string;
+  /** 服务端内存里这份地图的句柄；预览时用它，免去重传地图文本 */
+  mapKey?: string;
   width: number;
   height: number;
   waterAmount: number;

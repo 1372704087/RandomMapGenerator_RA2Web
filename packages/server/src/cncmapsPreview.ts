@@ -47,6 +47,16 @@ export function renderCncmapsPreview(
   previewWidth = 1600,
 ): Promise<Buffer> {
   const heavy = projectedPixels(mapContent) > MARKER_MAX_PIXELS;
+  const pixels = projectedPixels(mapContent);
+  if (pixels > MAX_PIXELS) {
+    const mb = Math.round((pixels * 5) / (1024 * 1024));
+    throw new CncmapsPreviewError(
+      `地图太大，已跳过实景预览（约 ${mb} MB 画布，超过 ${Math.round(
+        (MAX_PIXELS * 5) / (1024 * 1024),
+      )} MB 上限）；雷达预览与 .map 下载不受影响`,
+      413,
+    );
+  }
   const width = Math.min(2048, Math.max(400, Math.round(previewWidth)));
   const key = cacheKey(mapContent, width, !heavy);
 
@@ -67,20 +77,31 @@ export function renderCncmapsPreview(
   return job;
 }
 
-/** 标记层允许的最大投影像素数（菱形投影：宽 ×2，高 ×1）。 */
+/** 标记层允许的最大投影像素数（60px × 30px 一格）。 */
 const MARKER_MAX_PIXELS = 120_000_000;
+
+/** 允许渲染的最大投影像素数；再大就交给前端退回雷达预览（每像素 5 字节）。 */
+const MAX_PIXELS = Number(process.env.CNCMAPS_MAX_PIXELS ?? 150_000_000);
 
 /** 从 `[Map] Size=x,y,w,h` 估投影像素数；解析不出来就当作小图。 */
 function projectedPixels(mapContent: string): number {
-  const m = /\[Map\][^\[]*\bSize\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(
-    mapContent.slice(0, 4096),
+  // [Map] 前面可能压着几百行注释（生成器的头块），不能只在开头找
+  const at = mapContent.search(/\[map\]/i);
+  if (at < 0) return 0;
+  const m = /\bSize\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(
+    mapContent.slice(at, at + 512),
   );
   if (!m) return 0;
   const w = Number(m[3]);
   const h = Number(m[4]);
-  if (!Number.isFinite(w) || !Number.isFinite(h)) return 0;
-  // NumberedTileData 以菱形铺开：列 = 2w，行 = h
-  return 2 * w * h;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return 0;
+  // 一格 60×30 像素；DrawingSurface 是 3 B/px + Int16 z-buffer = 5 B/px
+  return w * 60 * h * 30;
+}
+
+/** 供路由判断是否值得尝试实景渲染（0 = 解析不出尺寸）。 */
+export function estimatePreviewPixels(mapContent: string): number {
+  return projectedPixels(mapContent);
 }
 
 function cacheKey(mapContent: string, width: number, markers: boolean): string {

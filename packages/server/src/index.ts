@@ -29,6 +29,7 @@ import { splitFullMap, splitSpawnUnitsForTheater, detectTheater, buildTheaterWar
 import { renderMapPreview } from '@ra2/core';
 import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
+import { putMap, getMap } from './mapHandoff';
 import { GenerateOptions } from './types';
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,9 @@ app.post(
         `attachment; filename="${encodedFileName}"; filename*=UTF-8''${encodedFileName}`,
       );
       res.setHeader('Content-Length', Buffer.byteLength(result.mapContent, 'utf-8'));
+      // 预览时凭这个 key 取回原文，省掉前端再上传一次几 MB 的地图文本
+      res.setHeader('X-Map-Key', putMap(result.mapContent));
+      res.setHeader('Access-Control-Expose-Headers', 'X-Map-Key, Content-Disposition');
 
       res.send(result.mapContent);
     } catch (err) {
@@ -388,7 +392,9 @@ app.post(
  */
 app.post('/api/rmg/cxx/generate', (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json(generateRmgCxx(req.body as Parameters<typeof generateRmgCxx>[0]));
+    const result = generateRmgCxx(req.body as Parameters<typeof generateRmgCxx>[0]);
+    // 预览用 key 取原文，前端不必把几 MB 的地图再传一遍
+    res.json({ ...result, mapKey: putMap(result.mapContent) });
   } catch (err) {
     next(err);
   }
@@ -444,26 +450,40 @@ app.post('/api/preview', (req: Request, res: Response, next: NextFunction) => {
  * POST /api/cncmaps-preview
  * 用 cncmaps-ts 渲染生成地图的缩略预览。
  *
- * 请求体: { mapContent: string, name?: string, width?: number }
- * 响应: image/png（默认 1600px 宽；500×500 全图约 30s）
+ * 请求体: { mapKey?: string, mapContent?: string, name?: string, width?: number }
+ *   mapKey 由生成接口（/api/generate 的 X-Map-Key 头、/api/rmg/cxx/generate 的字段）给出，
+ *   有 key 就优先用，避免前端重传整张地图。
+ * 响应: image/png（默认 1600px 宽）；画布超过 CNCMAPS_MAX_PIXELS 时回 413，
+ *       前端应退回雷达预览。
  *
  * 依赖 cncmaps Web 服务（默认 http://127.0.0.1:5174），可用 CNCMAPS_WEB_URL 覆盖。
  */
 app.post('/api/cncmaps-preview', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { mapContent, name, width } = req.body as {
+    const { mapKey, mapContent, name, width } = req.body as {
+      mapKey?: unknown;
       mapContent?: unknown;
       name?: unknown;
       width?: unknown;
     };
-    if (typeof mapContent !== 'string' || mapContent.trim().length === 0) {
-      res.status(400).json({ error: 'mapContent is required and must be a non-empty string' });
+    let content: string | null = null;
+    if (typeof mapKey === 'string' && mapKey.trim()) {
+      content = getMap(mapKey.trim());
+    }
+    if (!content && typeof mapContent === 'string' && mapContent.trim().length > 0) {
+      content = mapContent;
+    }
+    if (!content) {
+      res.status(400).json({
+        error:
+          'mapKey 已失效（服务可能重启过），请传 mapContent 或重新生成地图',
+      });
       return;
     }
     const previewWidth = typeof width === 'number' && Number.isFinite(width) ? width : 1600;
     const png = await renderCncmapsPreview(
-      mapContent,
-      typeof name === 'string' && name.trim() ? name : 'Random Map',
+      content,
+      typeof name === 'string' && name.trim() ? name.trim() : 'Random Map',
       previewWidth,
     );
     res.setHeader('Content-Type', 'image/png');

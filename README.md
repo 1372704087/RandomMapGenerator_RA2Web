@@ -42,6 +42,9 @@ pnpm dev:web
 同一种子重复生成直接命中（1 s → 14 ms）；`CNCMAPS_CACHE_DIR` / `CNCMAPS_CACHE_BYTES`
 （默认 512 MB，LRU 淘汰）可调。
 
+渲染内存约为「宽×60 × 高×30 × 5 字节」；超过 `CNCMAPS_MAX_PIXELS`（默认 1.5 亿像素 ≈ 715 MB）
+的地图不做实景渲染，接口回 413，前端退回雷达预览并把 .map 下载留着。
+
 ## 项目结构
 
 ```
