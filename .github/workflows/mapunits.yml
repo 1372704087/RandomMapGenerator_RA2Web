@@ -1,0 +1,54 @@
+name: mapunits
+
+# 只在校验对象变化时跑：MapUnit 资源、索引/改名脚本、索引 CSV 本身
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'packages/server/resources/MapUnits/**'
+      - 'scripts/mapunit-*.mjs'
+      - 're/specs/MAPUNIT_INDEX.csv'
+      - 're/specs/MAPUNIT_RENAME_MAP.csv'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/mapunits.yml'
+  pull_request:
+    paths:
+      - 'packages/server/resources/MapUnits/**'
+      - 'scripts/mapunit-*.mjs'
+      - 're/specs/MAPUNIT_INDEX.csv'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/mapunits.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mapunits-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  index-check:
+    name: 索引与磁盘一致
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.15.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # 索引脚本读的是编译产物 packages/core/dist（fileio / iniFile / connectionId），
+      # 新克隆没有 dist，必须先构建 core。
+      - name: 构建 @ra2/core
+        run: pnpm build:core
+
+      - name: 校验 MAPUNIT_INDEX.csv 与磁盘一致
+        run: pnpm check:mapunits

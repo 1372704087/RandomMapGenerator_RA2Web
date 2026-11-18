@@ -135,6 +135,8 @@ pnpm rename:mapunits    # 生成改名映射表（加 --apply 才落盘）
 pnpm verify:theaters    # 五个 theater 各生成一张图，检查各节内容数
 ```
 
+改完 `.map` 必须重建索引并提交 `MAPUNIT_INDEX.csv`；CI（`.github/workflows/mapunits.yml`）会在改动 `MapUnits/**`、`scripts/mapunit-*.mjs` 或索引 CSV 时自动跑 `check:mapunits`，索引与磁盘不一致则构建失败。
+
 ## 致谢
 
 - [handama/RandomMapGenerator_RA2](https://github.com/handama/RandomMapGenerator_RA2) - 原始 C# 项目
