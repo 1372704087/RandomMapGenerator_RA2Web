@@ -120,6 +120,21 @@ packages/
 - 自动生成缩略图预览
 - 完全随机模式 / 手动配置模式
 
+## MapUnit 资源规范
+
+`packages/server/resources/MapUnits/<THEATER>/` 下的手工地图单元改名与分组已规范化，规则见 [`re/specs/MAPUNIT_NAMING.md`](re/specs/MAPUNIT_NAMING.md)。
+
+- 命名：`<label>_<kind>_<code4>_w<weight>_<seq>.map`（例 `bhut_t_FBBF_w1_01.map`）；`empty.map` / `indicator.map` / `cannotplacesmudge.map` 与 `*.ini` 不动。
+- 目录：`_terrain/` `_spawn/` `_tiberium/` 是同一 theater 的分组，loader 递归读取；顶层 `_` 目录不会当成 theater。
+- 索引与校验：`re/specs/MAPUNIT_INDEX.csv`（321 件，权重/接口都是从 `.map` 读出来的）
+
+```bash
+pnpm index:mapunits     # 重建索引
+pnpm check:mapunits     # 校验磁盘与索引是否漂移（不一致 exit 1）
+pnpm rename:mapunits    # 生成改名映射表（加 --apply 才落盘）
+pnpm verify:theaters    # 五个 theater 各生成一张图，检查各节内容数
+```
+
 ## 致谢
 
 - [handama/RandomMapGenerator_RA2](https://github.com/handama/RandomMapGenerator_RA2) - 原始 C# 项目

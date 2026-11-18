@@ -9,6 +9,10 @@
     "build:web": "pnpm --filter @ra2/web build",
     "dev:server": "pnpm --filter @ra2/server dev",
     "dev:web": "pnpm --filter @ra2/web dev",
-    "test:core": "pnpm --filter @ra2/core test"
+    "test:core": "pnpm --filter @ra2/core test",
+    "index:mapunits": "node scripts/mapunit-index.mjs",
+    "check:mapunits": "node scripts/mapunit-index.mjs --check",
+    "rename:mapunits": "node scripts/mapunit-rename.mjs",
+    "verify:theaters": "node scripts/verify-theaters.mjs"
   }
 }

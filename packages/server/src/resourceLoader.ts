@@ -134,10 +134,10 @@ export function loadAllResources(): void {
     `[resourceLoader] Global resources loaded: outputName="${globalResources.outputName}", extension="${globalResources.outputExtension}"`,
   );
 
-  // 加载每个 theater
+  // 加载每个 theater（顶层以 `_` 开头的目录是分组/归档目录，不作为 theater）
   const entries = fs.readdirSync(MAP_UNITS_DIR, { withFileTypes: true });
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    if (!entry.isDirectory() || entry.name.startsWith('_')) continue;
     const theaterDir = path.join(MAP_UNITS_DIR, entry.name);
     console.log(`[resourceLoader] Loading theater: ${entry.name}`);
     const theaterRes = loadTheaterResources(theaterDir, globalResources);
@@ -228,6 +228,33 @@ function loadGlobalResources(): GlobalResources {
 }
 
 /**
+ * 递归列出 theater 目录下的 .map 单元文件（按相对路径排序，保证加载顺序稳定）。
+ *
+ * - `.map` 只认扩展名，其余文件（settings.ini / addition.ini / *.py …）忽略；
+ * - `_` 前缀子目录视为同一 theater 的**分组目录**（`_terrain` / `_spawn` / `_tiberium` …）；
+ * - 其他（非 `_`）子目录同样递归收进来，但不会新建 theater（theater 只由顶层目录决定）；
+ * - indicator.map / cannotplacesmudge.map 是脚手架，不作为单元。
+ */
+function listMapFilesRecursive(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.name.toLowerCase().endsWith('.map')) continue;
+      const base = entry.name.toLowerCase();
+      if (base === 'indicator.map' || base === 'cannotplacesmudge.map') continue;
+      out.push(full);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+/**
  * 加载单个 theater 的资源并预执行 SterilizeMapUnit 缓存结果。
  */
 function loadTheaterResources(
@@ -263,19 +290,15 @@ function loadTheaterResources(
   const playerAdditions = parsePlayerAdditions(settings);
 
   // 读取地图单元文件（排除 indicator.map 和 cannotplacesmudge.map）
-  const allFiles = fs.readdirSync(theaterDir);
+  // `_` 前缀子目录（_terrain / _spawn / _tiberium …）属于同一 theater 的分组，递归收进来。
+  const allFiles = listMapFilesRecursive(theaterDir);
   const mapUnitFiles: { name: string; content: string }[] = [];
-  for (const file of allFiles.sort()) {
-    if (
-      file.endsWith('.map') &&
-      file !== 'indicator.map' &&
-      file !== 'cannotplacesmudge.map'
-    ) {
-      mapUnitFiles.push({
-        name: file,
-        content: readTextFile(path.join(theaterDir, file)),
-      });
-    }
+  for (const full of allFiles) {
+    const file = path.basename(full);
+    mapUnitFiles.push({
+      name: file,
+      content: readTextFile(full),
+    });
   }
 
   // 读取 indicator.map（必需）
