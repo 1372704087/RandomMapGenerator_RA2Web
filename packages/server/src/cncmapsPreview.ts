@@ -25,18 +25,36 @@ let renderChain: Promise<unknown> = Promise.resolve();
  * 起点/矿标记是可选叠加层：cncmaps 在遇到无效起点索引时会直接抛错退出
  * （`TileLayer.getTile` 拿到 undefined）。所以先带标记渲染，失败就退回不带标记
  * 重渲一次——地图本体能出图，比因为一层记号整张图 502 好。
+ *
+ * 超大图（500×500 这种，全尺寸画布约 3000 万～4 亿像素）再加标记层会直接把子进程
+ * 的堆撑爆（exit 134 / SIGABRT）。所以超过阈值时干脆不带标记，省一次必崩的重渲。
  */
 export function renderCncmapsPreview(
   mapContent: string,
   name: string,
   previewWidth = 1600,
 ): Promise<Buffer> {
-  const job = renderChain.then(() => doRender(mapContent, name, previewWidth, true));
+  const heavy = projectedPixels(mapContent) > MARKER_MAX_PIXELS;
+  const job = renderChain.then(() => doRender(mapContent, name, previewWidth, !heavy));
   renderChain = job.then(
     () => undefined,
     () => undefined,
   );
   return job;
+}
+
+/** 标记层允许的最大投影像素数（菱形投影：宽 ×2，高 ×1）。 */
+const MARKER_MAX_PIXELS = 120_000_000;
+
+/** 从 `[Map] Size=w,h` 估投影像素数；解析不出来就当作小图。 */
+function projectedPixels(mapContent: string): number {
+  const m = /\[Map\][^\[]*\bSize\s*=\s*(\d+)\s*,\s*(\d+)/i.exec(mapContent.slice(0, 4096));
+  if (!m) return 0;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return 0;
+  // NumberedTileData 以菱形铺开：列 = 2w，行 = h
+  return 2 * w * h;
 }
 
 async function doRender(
@@ -49,7 +67,7 @@ async function doRender(
     return await doRenderOnce(mapContent, name, previewWidth, withMarkers);
   } catch (err) {
     if (withMarkers && !(err instanceof CncmapsPreviewError && err.statusCode === 503)) {
-      // 标记层炸了（多半是起点索引无效）→ 去掉标记再来一次
+      // 标记层炸了（起点索引无效 / 大图内存不够）→ 去掉标记再来一次
       try {
         return await doRenderOnce(mapContent, name, previewWidth, false);
       } catch (err2) {
@@ -112,19 +130,30 @@ async function doRenderOnce(
     }
     const lines = (await res.text()).split(/\r?\n/);
     let done: { ok?: boolean; url?: string; message?: string } | null = null;
+    let fatal: string | null = null;
     for (const line of lines) {
       if (!line.trim()) continue;
-      let msg: { type?: string; ok?: boolean; url?: string; message?: string };
+      let msg: {
+        type?: string;
+        ok?: boolean;
+        url?: string;
+        message?: string;
+        level?: string;
+      };
       try {
         msg = JSON.parse(line) as typeof msg;
       } catch {
         continue;
       }
+      if (msg.type === 'log' && msg.level === 'fatal') fatal = msg.message ?? fatal;
       if (msg.type === 'error') throw new Error(msg.message || 'cncmaps 渲染失败');
       if (msg.type === 'done') done = msg;
     }
-    if (!done) throw new Error('cncmaps 未返回渲染结果');
-    if (!done.ok || !done.url) throw new Error(done.message || 'cncmaps 渲染失败');
+    if (!done) throw new Error(`cncmaps 未返回渲染结果${fatal ? `（${fatal}）` : ''}`);
+    if (!done.ok || !done.url) {
+      const why = [done.message || 'cncmaps 渲染失败', fatal].filter(Boolean).join('：');
+      throw new Error(why);
+    }
     imageUrl = done.url;
   } catch (err) {
     if (err instanceof CncmapsPreviewError) throw err;

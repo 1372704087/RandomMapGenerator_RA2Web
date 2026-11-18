@@ -22,6 +22,23 @@ pnpm dev:web
 
 打开 http://localhost:5173 即可使用。
 
+### cncmaps 预览渲染服务（可选，端口 5174）
+
+生成后的真贴图预览由同机运行的另一套渲染器提供；不启动时预览会失败但地图产出不受影响。
+
+```powershell
+# 需要设堆：500×500 地图的全尺寸画布约 4.4 亿像素，默认堆会 abort（exit 134 → 前端 502）
+.\scripts\start-cncmaps-web.ps1 -GameDir 'F:\Red-Alert-2-Yuris-Revenge'
+```
+
+| env | 作用 |
+| --- | --- |
+| `CNCMAPS_WEB_PORT` | 渲染服务端口（默认 5174） |
+| `CNCMAPS_GAME_DIR` | 指向含 `ra2.mix`/`language.mix` 的游戏目录，否则渲染 exit 1 |
+| `NODE_OPTIONS` | 脚本设为 `--max-old-space-size=8192`，子进程继承 |
+
+主后端可用 `CNCMAPS_WEB_URL` 指向别的渲染服务（默认 `http://127.0.0.1:5174`）。
+
 ## 项目结构
 
 ```
