@@ -1,10 +1,8 @@
 packages:
   - 'packages/*'
 
+# 允许构建的依赖（pnpm 11 用 allowBuilds 白名单：包名 → true）。
+# 缺了它，esbuild 的 postinstall 会被静默跳过，之后 pnpm install / pnpm run
+# 会报 ERR_PNPM_IGNORED_BUILDS（vite / tsx / cncmaps 的构建链都依赖 esbuild）。
 allowBuilds:
-  esbuild: set this to true or false
-
-# 允许构建的依赖（pnpm 10+ 需要显式白名单，否则 esbuild 等只有 postinstall 的包会被静默跳过，
-# 之后 `pnpm run` 会报 ERR_PNPM_IGNORED_BUILDS）
-onlyBuiltDependencies:
-  - esbuild
+  esbuild: true
