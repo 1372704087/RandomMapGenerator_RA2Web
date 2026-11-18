@@ -163,6 +163,7 @@ const newTileCellAttr = (): TileCellAttr => ({
     hasFrame: false,
     terrainType: 0,
     rampType: 0,
+    frameHeight: 0,
     flags36: 0,
     cellsInX: 0,
     cellsInY: 0,
@@ -323,8 +324,9 @@ function parseTmpInto(out: TileCellAttr[], path: string): void {
         if (offset > 0 && offset + 43 <= data.length) {
             attr.hasFrame = true;
             attr.flags36 = data[offset + 36];
+            attr.frameHeight = data[offset + 40];   // frame +0x28
             attr.terrainType = data[offset + 41];
-            attr.rampType = data[offset + 42];
+            attr.rampType = data[offset + 42];      // frame +0x2A (slope)
             attr.extra4 = view.getInt32(offset + 4, true);
             attr.extra24 = view.getInt32(offset + 24, true);
 
@@ -394,6 +396,19 @@ export function loadTileCellAttrs(r: Rmg, theater: number): void {
             }
         }
         running += tilesInSet;
+    }
+
+    // ---- per-subtile height/slope, for the stamping routines --------------
+    // gamemd's 0x5A6C10 stamp reads each frame's own +0x28 height and +0x2A
+    // slope; the port keeps those in TileCellAttr, so hand the RMG the flattened
+    // per-tile table it needs. Index = row * cellsInX + col, the TMP's own
+    // order. A hole (missing frame) stores null and stamps nothing.
+    for (let tile = 0; tile < r.tileCellAttrs.length; ++tile) {
+        const frames = r.tileCellAttrs[tile];
+        if (frames === undefined || frames.length === 0)
+            continue;
+        r.tileSubtileOverrides.set(tile, frames.map((a) =>
+            a !== undefined && a.hasFrame ? { height: a.frameHeight, slope: a.rampType } : null));
     }
 }
 

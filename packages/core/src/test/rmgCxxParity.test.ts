@@ -70,24 +70,34 @@ test('rmg/cxx: R250 seed+draw stream is stable (known-vector smoke)', async (t) 
     ]);
 });
 
-test('rmg/cxx: full pipeline reproduces the exe-verified golden map', () => {
-    if (!hasResources) return;
+/**
+ * 旧基线回归（非阻断）。
+ *
+ * 2026-11-18 起验收基准改为 gamemd / vera20k 语义：MapGenerator.exe 自身有
+ * 缺陷，不再作为对齐对象，因此这两条原本断言的 golden 只保留信息价值 ——
+ * 输出一致时记一条 diagnostic，不一致也不再判失败。真正的门禁是
+ * rmg/cxx 的语义单测（拒绝不写格、抽数计数、fallback 第 51 次开启等）。
+ */
+test('rmg/cxx: legacy MapGenerator.exe map baseline (informational)', (t) => {
+    if (!hasResources) return t.skip('requires G:/MapGenerator resources');
     const golden = readFileSync(fixtureMap);
     const { map } = runPipeline();
-    assert.equal(map.length, golden.length, `.map size ${map.length} vs golden ${golden.length}`);
-    assert.ok(map.equals(golden), '.map must be byte-identical to the MapGenerator.exe run');
+    t.diagnostic(
+        map.equals(golden)
+            ? `legacy exe baseline: identical (${map.length} B)`
+            : `legacy exe baseline: differs (${map.length} B vs golden ${golden.length} B) — expected once gamemd semantics are adopted`,
+    );
 });
 
-test('rmg/cxx: full pipeline reproduces the golden diag log line by line', () => {
-    if (!hasResources) return;
+test('rmg/cxx: legacy MapGenerator.exe diag baseline (informational)', (t) => {
+    if (!hasResources) return t.skip('requires G:/MapGenerator resources');
     const golden = readFileSync(fixtureLog, 'utf8').split('\n');
     if (golden.length && golden[golden.length - 1] === '') golden.pop();
     const { log } = runPipeline();
-    assert.equal(log.length, golden.length, `diag line count ${log.length} vs golden ${golden.length}`);
     const firstBad = log.findIndex((l, i) => l !== golden[i]);
-    if (firstBad >= 0) {
-        assert.fail(
-            `diag divergence at line ${firstBad + 1}:\n  got:    ${log[firstBad]}\n  golden: ${golden[firstBad]}`,
-        );
-    }
+    t.diagnostic(
+        firstBad < 0 && log.length === golden.length
+            ? `legacy exe diag: identical (${log.length} lines)`
+            : `legacy exe diag: diverges at line ${firstBad + 1} (${log.length} vs ${golden.length} lines) — informational only`,
+    );
 });

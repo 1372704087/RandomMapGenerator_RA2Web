@@ -327,7 +327,10 @@ export interface MultiplayerHouse {
 export interface TileCellAttr {
     hasFrame: boolean;
     terrainType: number;
+    /** Frame `+0x2A` — the slope byte a stamp writes into the cell. */
     rampType: number;
+    /** Frame `+0x28` — the height the stamp adds to the region level. */
+    frameHeight: number;
     flags36: number;
     cellsInX: number;
     cellsInY: number;

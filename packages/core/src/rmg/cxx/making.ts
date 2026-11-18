@@ -327,12 +327,14 @@ export function buildRegionFromCell(r: Rmg, cell: MapCell | null): MapRegion | n
 
                 const it = new CellIterator();       // 0x58cd79
                 it.reset(r.cellSlots, r.size.mapWidth);
+                let dissolved = 0;
                 for (let c = it.next(); c !== null; c = it.next()) {
                     const x = i16(unpX(c.mapCoords));
                     const y = i16(unpYS(c.mapCoords));
                     const wi = r.workIndex(x, y);
                     if (r.work.i(wi, 14) !== mark)   // 0x58cdbd
                         continue;
+                    ++dissolved;
                     r.work.setI(wi, 14, handOver);   // 0x58cdbf
                     r.work.setByte(wi, 75, 0);       // 0x58cdc2
                     c.isoTileTypeIndex = 0;          // 0x58cdc6
@@ -340,6 +342,8 @@ export function buildRegionFromCell(r: Rmg, cell: MapCell | null): MapRegion | n
                     c.level = handLevel !== -1 ? handLevel       // 0x58cddd
                         : r.baseLevel;               // ::Level = this[195]
                 }
+                if (process.env.RMG_DEBUG_NB)
+                    diag(`DISSOLVE-A mark=${mark} cells=${dissolved} hand=${handOver} lvl=${handLevel}`);
                 return null;                         // LABEL_63 (0x58cc9f)
             }
         } else {
@@ -376,12 +380,14 @@ export function buildRegionFromCell(r: Rmg, cell: MapCell | null): MapRegion | n
 
                 const it = new CellIterator();       // 0x58cbf6
                 it.reset(r.cellSlots, r.size.mapWidth);
+                let dissolved = 0;
                 for (let c = it.next(); c !== null; c = it.next()) {
                     const x = i16(unpX(c.mapCoords));
                     const y = i16(unpYS(c.mapCoords));
                     const wi = r.workIndex(x, y);
                     if (r.work.i(wi, 14) !== 0)      // 0x58cc34
                         continue;
+                    ++dissolved;
                     r.work.setI(wi, 14, -1);         // 0x58cc39
                     r.work.setByte(wi, 75, 0);       // 0x58cc3c
                     c.isoTileTypeIndex = 0;          // 0x58cc40
@@ -389,6 +395,8 @@ export function buildRegionFromCell(r: Rmg, cell: MapCell | null): MapRegion | n
                     c.level = nbLevel !== -1 ? nbLevel       // 0x58cc56
                         : r.baseLevel;               // ::Level = this[195]
                 }
+                if (process.env.RMG_DEBUG_NB)
+                    diag(`DISSOLVE-B cells=${dissolved} nbLvl=${nbLevel} pick=(${pickX},${pickY}) nbr=(${nx},${ny})`);
             }
 
             if (handedOver)
@@ -506,6 +514,40 @@ export function collectRegionBoundary(r: Rmg, region: MapRegion | null): number[
     }
 
     return boundary;
+}
+
+// ---------------------------------------------------------------------------
+// CollectRegionBorderCells - sub_5A0700 - the same predicate as sub_58D410 but
+// swept over the scratch records LINEARLY (index y * workSide + x), which is
+// the row-major work order and NOT the isometric cell-iterator order. The ramp
+// carver (0x005905D0) samples this list, so the two flavours cannot be swapped:
+// the same length with a different order yields a different pick for the same
+// draw. See vera20k adjacency::border_cells_of.
+// ---------------------------------------------------------------------------
+export function collectRegionBorderLinear(r: Rmg, region: MapRegion | null): number[] {
+    const border: number[] = [];
+    if (region === null || r.work.count === 0)
+        return border;
+
+    const side = r.size.workSide;
+    for (let y = 0; y < side; ++y) {
+        for (let x = 0; x < side; ++x) {
+            if (!r.cellExists(i16(x), i16(y)))
+                continue;
+            if (r.work.i(r.workIndex(x, y), 14) !== region.id)
+                continue;
+            for (let dir = 0; dir < 8; ++dir) {
+                const nx = i16(x + DIR_X[dir]!);
+                const ny = i16(y + DIR_Y[dir]!);
+                if (r.cellExists(nx, ny)
+                    && r.work.i(r.workIndex(nx, ny), 14) !== region.id) {
+                    border.push(packXY(x, y));
+                    break;
+                }
+            }
+        }
+    }
+    return border;
 }
 
 // ---------------------------------------------------------------------------

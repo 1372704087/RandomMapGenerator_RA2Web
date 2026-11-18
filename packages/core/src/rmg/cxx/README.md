@@ -1,9 +1,59 @@
-# rmg/cxx —— G:\MapGenerator C++ 工程对齐管线
+# rmg/cxx —— gamemd 随机地图生成器逆向管线
 
-**目标**：与 `G:\MapGenerator`（gamemd 随机地图生成器的 C++ 重写版，含编译产物
-`x64/Release/MapGenerator.exe`）**逐字节对齐**：同参数 + 同种子 ⇒ 相同的 .map。
+**目标**：按 gamemd 原生语义复刻随机地图生成（以 VERA20k `src/map/rmg/` 的逆向
+实现为参照）：同参数 + 同种子 ⇒ 与 gamemd 相同的 .map。`G:\MapGenerator` 的 C++
+重写版仅作历史来源，**不再作为对齐目标**（其自身有缺陷，且源码正在移植 Phobos）。
 
 **状态（2026-10-10 深夜）**：
+
+> **2026-11-18 基准切换 —— 验收改为 gamemd / vera20k**
+>
+> **2026-11-18 收网：11 场 conformance 全等。** 三处根因（按影响力排序）：
+>
+> 1. **掩码算错了区域** —— `carveRampAt` 曾把**低地**（被刻下去那一侧）的 id
+>    传给 `rampMask`，原生 `BuildRampOrientationMask(scratch, cell,
+>    regions.region, leniency)` 传的是**高地=刻坡方** id
+>    （`carve_driver.rs:158`）。八位窗口全反相，分派必然走反方向形状。
+>    plateau 五场（case 4/5/6/7 与 8）由此一次性归位。
+> 2. **边界表用错版本** —— carve 采样的是 `CollectRegionBorderCells
+>   0x005A0700`（按 scratch 线性序 `y*workSide+x` 扫），不是
+>    `0x0058D410`（cell iterator 的等距序）。新增 `collectRegionBorderLinear`
+>   专供 carve 路径；同一随机索引在两种顺序下对应完全不同的格子。
+> 3. **盖章只写砖、不写 slope/高度** —— 原生 `stamp_iso_block` 是逐 subtile：
+>   `sub_tile=index`、`level=sub.height+base-4`、`slope=sub.slope`。原
+>   `placeWaterDetailTile` 写死 `slopeIndex=0` 且用 footprint z 代替 frame
+>   高度，导致 14–16 格 slope 错。新增 `Rmg.tileSubtileOverrides`，生产链路
+>   由 `loadTileCellAttrs` 从 TMP 帧的 `+0x28`（高度）/`+0x2A`（slope）灌入。
+>
+> 结果：`rmgBridgeOracle.test.ts` 11/11 逐格全等（tile/sub/level/slope/
+> overlay/object、逐格区域 id、`listed`、`next_region_id`），全部升为硬断言。
+> 原生逐次尝试轨迹工具：`scratch/trace_ramp_attempts.py`（挂钩
+> `0x590970`/四个 carver，并 dump 刻坡前 scratch 区域表）。
+>
+> `MapGenerator.exe` 自身存在缺陷，不再作为对齐对象（`G:\MapGenerator` 源码
+> 正在移植 Phobos，也不要动）。参考实现改为 VERA20k 的
+> `src/map/rmg/phases/{carve,carve_driver,ramp,connector}.rs`，其中逐函数标了
+> gamemd 原生地址（`CarveConnectorsOrBridges 0x005905D0`、
+> `TryCarveConnectorAtCell 0x00590970`、`RectIsCarveable 0x00594010`）。
+>
+> 已按此修正：
+> 1. 去掉 `rampRectClear` 的 ±2 halo 扫描 —— `RectIsCarveable` 只有四角
+>    playfield + 逐格归属/空地两段。
+> 2. 去掉刻后验收层（`sideHighClash` + owner 高地块计数）：exe 的拒绝全部在
+>    刻前，这层是移植期自造的，曾直接导致 env3/4 取消集与参照不一致。
+> 3. 四条直坡改回 gamemd 端点：每形状 2 个 0/1 jitter，fallback 用固定几何
+>    且从 leniency > 0.5（第 51 次）才启用；角坡不抽数。原
+>    `stripPlan/stripCorners` 的随机条带循环来自 C++ 重写版（0x14001EDDB..），
+>    不属于 gamemd。
+>
+> 复核结论：`rampBuilder4/5/6/7` 与 20k `clear_west/east/north/south` 的 rect
+> 与四个 fill 矩形逐项相同（含 half 的 `+3`/`+0` 差异、tail 的 4/3/2/1 面序）；
+> 三个角坡 builder 的 rect 与端点公式也对得上。直坡拒绝条件
+> （`run > length - 5`）两边本已一致。
+>
+> `src/test/rmgCxxParity.test.ts` 的两条 exe golden 断言已降级为 diagnostic
+> （非阻断），仅保留 R250 抽数冒烟；后续门禁应改成按 20k 语义写的 spec 测试
+> （拒绝不写格/不抽数、fallback 第 51 次、角坡不抽数）。
 
 > **2026-10-10 深夜续（05CC51D7 收网轮）—— 两处反汇编实锤，exe 前两个取消逐字节复现**：
 >

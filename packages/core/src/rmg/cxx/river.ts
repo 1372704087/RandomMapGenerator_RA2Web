@@ -2622,12 +2622,27 @@ export function placeWaterDetailTile(r: Rmg, tileIndex: number, packedCoords: nu
     const anchorX = unpX(packedCoords);
     const anchorY = unpYS(packedCoords);
     let zIndex = 0; // occupied-cell counter
+    // Per-subtile height/slope, when the theater registration knows them. The
+    // original stamp (0x5A6C10) reads each frame's own +0x28/+0x2A; without
+    // this a slope-set piece lands with slope 0 and every level off by the
+    // frame height.
+    const subs = r.tileSubtileOverrides?.get(tileIndex) ?? null;
 
     for (let row = 0; row < fp.h; ++row) { // CellsInY
         for (let col = 0; col < fp.w; ++col) { // CellsInX
-            if (!maskBit(fp.mask, row * fp.w + col))
+            const subIndex = row * fp.w + col;
+            let subHeight = 0;
+            let subSlope = 0;
+            if (subs !== null) {
+                const sub = subs[subIndex];
+                if (sub === undefined || sub === null)
+                    continue; // frame hole: the original writes nothing
+                subHeight = sub.height;
+                subSlope = sub.slope;
+            } else if (!maskBit(fp.mask, row * fp.w + col)) {
                 continue; // frame == null: 0x5a6ce2
-            const z = fp.z[zIndex] ?? 0;
+            }
+            const z = subs !== null ? subHeight : (fp.z[zIndex] ?? 0);
             ++zIndex;
 
             const x = i16(anchorX + col);
@@ -2636,11 +2651,11 @@ export function placeWaterDetailTile(r: Rmg, tileIndex: number, packedCoords: nu
                 continue; // 0x5a6cb4
 
             const cell = r.cellAt(x, y);
-            cell.height = col + row * fp.w;   // 0x5a6cea
+            cell.height = subIndex;            // sub-tile index (0x5a6cea)
             cell.isoTileTypeIndex = tileIndex; // 0x5a6cf4
             if (level !== -1)                  // 0x5a6cfa
                 cell.level = level + z - 4;    // + frame[+0x28]
-            cell.slopeIndex = 0;               // frame[+0x2A]: not tabulated
+            cell.slopeIndex = subSlope;        // frame[+0x2A]
             r.work.setI(r.workIndex(x, y), 14, genCode); // 0x5a6d3a
         }
     }
@@ -2651,6 +2666,20 @@ export function placeWaterDetailTile(r: Rmg, tileIndex: number, packedCoords: nu
 // cliff/water pieces (28), the destroyable cliffs (2) and the four waterfall
 // sets (4 each). null for a tile that is none of them.
 function findFamilyFootprint(r: Rmg, tile: number): IsoFootprint | null {
+    // Generic per-tile geometry: the original reads the loaded TMP's own
+    // width/height at 0x5A6C10 for every family. The port only carries static
+    // tables for the cliff/shore/waterfall sets, so anything else (paved roads,
+    // road ends, ramp-base pieces) is supplied here when known.
+    const override = r.tileFootprintOverrides?.get(tile);
+    if (override !== undefined) {
+        const cells = override.w * override.h;
+        return {
+            w: override.w,
+            h: override.h,
+            mask: Math.pow(2, cells) - 1,   // exact in doubles for cells <= 49
+            z: new Array<number>(cells).fill(0),
+        };
+    }
     if (r.shorePieces >= 0 && tile >= r.shorePieces && tile < r.shorePieces + 42)
         return kShoreFootprints[tile - r.shorePieces]!;
     if (r.shoreTileIndex >= 0 && tile >= r.shoreTileIndex && tile < r.shoreTileIndex + 40)

@@ -276,6 +276,16 @@ export class Rmg {
     miscPaveTileIndex = -1;
     paveTileIndex = -1;
     waterFamily4Base = [-1, -1, -1, -1]; // East, West, South, North
+    // Per-tile geometry for families the port has no static table for (paved
+    // roads, road ends, ramp base...). The original reads each loaded TMP's own
+    // width/height; the web pipeline learns them from the TMP headers.
+    tileFootprintOverrides: Map<number, { w: number, h: number }> = new Map();
+    // Per-subtile height/slope for the same families. gamemd's stamping reads
+    // each frame's own +0x28 height and +0x2A slope (vera20k
+    // stamp_iso_block), so a stamp is not just "tile + level": the slope byte
+    // and the sub-tile height both come from here. null = the block has a hole.
+    tileSubtileOverrides: Map<number, Array<{ height: number, slope: number } | null>>
+        = new Map();
     shorePieces = -1;
     shoreAnchor: number[] = new Array(42).fill(0); // packed (0,0) until filled
     rampSmoothIndex = -1;

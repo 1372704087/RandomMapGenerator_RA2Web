@@ -81,6 +81,7 @@ import {
     releaseRegionObject,
     assignRemainingCells,
     collectRegionBoundary,
+    collectRegionBorderLinear,
     createRegionRecord,
 } from './making';
 
@@ -829,6 +830,21 @@ export function legalizeRegionLevels(r: Rmg): void {
     }
 }
 
+/**
+ * [20K-MATCH 2026-11-18] 严格 gamemd 语义开关。
+ *
+ * 打开后 `reseedRegions` 跳过移植期自造的两步 quality-fix，逐步对应 gamemd
+ * 的 0x58EF10（AssignRemainingCells 之后直接邻接 + 坡道）。仅用于与
+ * `tools/rmg_oracle/bridge_pass` 的对拍与回归；正常出图保持 false。
+ */
+let gamemdStrict = false;
+export function setGamemdStrict(on: boolean): void {
+    gamemdStrict = on;
+}
+export function isGamemdStrict(): boolean {
+    return gamemdStrict;
+}
+
 export function reseedRegions(r: Rmg): void {
     if (r.work.count === 0 || r.cellSlots.length === 0)
         return;
@@ -836,7 +852,14 @@ export function reseedRegions(r: Rmg): void {
     const side = r.size.workSide;
     const workCount = side * side;
 
-    // ---- 1. Preview reset + the cliff blob pass (0x58ef15 - 0x58ef65) -----
+    const probe = (step: string): void => {
+        if (!process.env.RMG_DEBUG_NB)
+            return;
+        diag(`RESEED-STEP ${step} lv28_16=${r.cellAt(28, 16).level}`
+            + ` lv29_16=${r.cellAt(29, 16).level} lv26_23=${r.cellAt(26, 23).level}`
+            + ` tile28_16=${r.cellAt(28, 16).isoTileTypeIndex}`);
+    };
+    probe('enter');                                       // ---- 1. Preview reset + the cliff blob pass (0x58ef15 - 0x58ef65) -----
     resetPreviewState(r);
     let pass = true;                                      // vanilla v15 (0x58ef1e)
     {
@@ -850,6 +873,7 @@ export function reseedRegions(r: Rmg): void {
     }
 
     // ---- 2. Reset the work marks (0x58ef67 - 0x58ef96) --------------------
+    probe('afterCliff');
     for (let idx = 0; idx < workCount; ++idx) {           // 0x58ef7e
         r.work.setI(idx, 14, -1);                         // 0x58ef88 byte 56
         r.work.setI(idx, 15, -1);                         // 0x58ef92 byte 60
@@ -870,16 +894,27 @@ export function reseedRegions(r: Rmg): void {
     // the shared helper with flag 0 produces the identical sweep order and
     // stamped value.
     assignRemainingCells(r, 0);                           // 0x58efcb - 0x58f02b
+    probe('afterAssign');
 
     // [QUALITY-FIX] 层值已定型、坡道未雕刻 —— 合法化可见落差的唯一正确时机
     // [QUALITY-FIX] 区域粒度合法化(源头): 此刻标记已有效、坡道未雕刻
-    legalizeRegionLevels(r);
-    legalizeLevelBoundaries(r);
+    //
+    // [20K-MATCH 2026-11-18] 这两步是移植期自造的，gamemd 的 0x58EF10 在
+    // AssignRemainingCells 之后直接进邻接/坡道。做 gamemd 对拍时必须关掉，
+    // 否则层值在坡道刻前已被改写，对拍结果永远对不上。
+    if (!gamemdStrict) {
+        legalizeRegionLevels(r);
+        legalizeLevelBoundaries(r);
+    }
 
     // ---- 5. Adjacency and ramps (0x58f033 - 0x58f0aa) ---------------------
     if (pass) {                                           // 0x58f038
         for (let j = 0; j < r.regions.length; ++j)        // 0x58f04b sub_58F0C0
             linkRegionNeighbours(r, r.regions[j]!);
+
+        if (process.env.RMG_DEBUG_NB)
+            for (const g of r.regions)
+                diag(`REGION-NB id=${g.id} z=${g.level} water=${g.waterFamily ? 1 : 0} cells=${g.cellCount} nb=[${g.neighbours.join('/')}]`);
 
         for (let j = 0; j < r.regions.length; ++j) {      // 0x58f069 sub_5905D0
             carveRegionRamps(r, r.regions[j]!);
@@ -952,6 +987,8 @@ export function cliffPass(r: Rmg, cell: MapCell | null, mode: number): boolean {
             return false;
 
         cell.level += 4;                                  // 0x5792xx fill the dip
+        if (process.env.RMG_DEBUG_CLIFF)
+            diag(`CLIFF-RAISE x=${x} y=${y} mask=${mask} mode=${mode} lvl=${cell.level}`);
         r.work.setI(wi, 14, mode);                        // 0x5792xx sub_5A0090
 
         for (let dir = 0; dir < 8; ++dir) {               // 0x5792xx
@@ -1109,16 +1146,16 @@ export function carveRegionRamps(r: Rmg, region: MapRegion | null): void {
         const nb = region.neighbours.slice();             // a copy: callees can
         const count = nb.length;                          // reshape the array
         if (count - 1 > 0) {                              // 0x59060c
-            for (let i = 1; i < count; ++i) {             // 0x5906xx (v42)
-                const a = findRegionById(r, nb[i]!);
+            for (let i = 0; i < count - 1; ++i) {         // 0x5906xx [20K-MATCH] first
+                const a = findRegionById(r, nb[i]!);      // slot runs 0..count-2
                 if (a === null)                           // vanilla reads past the
                     continue;                             // array here
                 if (a.neighbours.length <= 1 && a.cellCount <= 50)   // 0x5906xx
                     continue;                             // LABEL_28
-                for (let j = i; j < count; ++j) {         // 0x5907xx (j starts at i)
-                    const b = findRegionById(r, nb[j]!);
-                    if (b === null)
-                        continue;
+                for (let j = i + 1; j < count; ++j) {     // 0x5907xx [20K-MATCH] second
+                    const b = findRegionById(r, nb[j]!);  // slot starts at i+1: gamemd
+                    if (b === null)                       // never pairs a region with
+                        continue;                         // itself (0x0059067x)
                     if ((b.neighbours.length > 1 || b.cellCount > 50)
                         && !b.waterFamily) {              // 0x5907xx
                         if (b.level === a.level && a.level === region.level)
@@ -1171,7 +1208,9 @@ export function carveRegionRamps(r: Rmg, region: MapRegion | null): void {
         const higher = findRegionById(r, higherId);       // 0x5907xx
         if (higher === null)
             continue;
-        const list = collectRegionBoundary(r, higher);    // 0x5908cd
+        const list = collectRegionBorderLinear(r, higher);    // 0x5908cd → 0x5A0700
+                                                              // (linear sweep, not
+                                                              //  the cell iterator)
 
         // Port tuning (user request 2026-10-01): the roll gate above
         // (accessibility) already grants 2-3 ramp slots for most pairs; the
@@ -1216,7 +1255,11 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
     const y = unpYS(coords);
 
     const ok: Box<boolean> = { v: true };                 // 0x590974 (flag[0] = 1)
-    const mask = rampMask(r, coords, ok, regionId, ratio);     // 0x590981 sub_590FD0
+    // Native: BuildRampOrientationMask(scratch, cell, regions.region, leniency)
+    // where `regions.region` is the UPHILL id — the region doing the carving
+    // (carve_driver.rs:158). Passing the downhill id inverts every window bit
+    // and sends the dispatcher down the opposite branch.
+    const mask = rampMask(r, coords, ok, owner.id, ratio);     // 0x590981 sub_590FD0
     if (process.env.RMG_DEBUG_STAMP)
         diag(`RAMP-MASK at=(${x},${y}) ok=${ok.v ? 1 : 0} mask=${mask} owner=${owner.id} tgt=${regionId} tgtL=${findRegionById(r, regionId)?.level}`);
     if (!ok.v)                                            // 0x59097e
@@ -1227,248 +1270,14 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
     let carved = 0;                                       // vanilla's v7
 
 
-    // ------------------------------------------------------------------
-    // 刻完回头验（用户报障 2026-10-02：(94,126) 一带悬崖堵塞）
-    //
-    // 坡肩（builder 靠 owner 那一侧的台阶）是刻坡过程中才抬出来的高地，
-    // 刻坡前根本不存在，所以 RampRectClear 那种"刻坡前量距离"的静态检查
-    // 永远量不到它。这里改成刻完之后回头看一眼：owner 自己的高地格
-    // （坡肩加本体）有没有被这次刻坡切成两块。切开了就整块撤销。
-    // ------------------------------------------------------------------
-    const side = r.size.workSide;
-    const snapX0 = x - 20;                                // 本次刻坡会改到的范围
-    const snapY0 = y - 20;
-    const snapW = 41;
-    const snapH = 41;
 
-    // owner 高地格（编号是 owner、Level 不低于 owner->level 的格子）被分成了
-    // 几块；只数跟快照窗口有交的块，窗口外那些本来就有的旧块不算数。
-    const countOwnerHighBlocks = (): number => {
-        const scanX0 = x - 28;                            // 比快照窗口再外扩 8 格
-        const scanY0 = y - 28;
-        const scanW = 57;
-        const scanH = 57;
-        const seen = new Uint8Array(scanW * scanH);
-        const stack: number[] = [];
-        let blocks = 0;
-        for (let row = 0; row < scanH; ++row) {
-            for (let col = 0; col < scanW; ++col) {
-                const cx = scanX0 + col;
-                const cy = scanY0 + row;
-                if (seen[row * scanW + col] !== 0 || !r.cellExists(cx, cy))
-                    continue;
-                if (r.work.i(cx + side * cy, 14) !== owner.id)
-                    continue;
-                const mc = r.cellAt(cx, cy);
-                if (mc.level < owner.level)
-                    continue;
-
-                let touchesSnapshot = false;
-                ++blocks;
-                seen[row * scanW + col] = 1;
-                stack.push(row * scanW + col);
-                while (stack.length > 0) {
-                    const idx = stack.pop()!;
-                    const px = scanX0 + (idx % scanW);
-                    const py = scanY0 + Math.trunc(idx / scanW);
-                    if (px >= snapX0 && px < snapX0 + snapW
-                        && py >= snapY0 && py < snapY0 + snapH)
-                        touchesSnapshot = true;
-                    for (let d = 0; d < 8; ++d) {
-                        const nx = px + K_DIR_X[d]!;
-                        const ny = py + K_DIR_Y[d]!;
-                        if (!r.cellExists(nx, ny))
-                            continue;
-                        const nc = nx - scanX0;
-                        const nr = ny - scanY0;
-                        if (nc < 0 || nc >= scanW || nr < 0 || nr >= scanH)
-                            continue;
-                        const nidx = nr * scanW + nc;
-                        if (seen[nidx] !== 0)
-                            continue;
-                        if (r.work.i(nx + side * ny, 14) !== owner.id)
-                            continue;
-                        const nmc = r.cellAt(nx, ny);
-                        if (nmc.level < owner.level)
-                            continue;
-                        seen[nidx] = 1;
-                        stack.push(nidx);
-                    }
-                }
-                if (!touchesSnapshot)
-                    --blocks;                             // 窗口外的旧块不计入
-            }
-        }
-        return blocks;
-    };
-
-    const ownerHighBlocksBefore = countOwnerHighBlocks();
-
-    const snapCells: MapCell[] = new Array(snapW * snapH).fill(null).map(() => new MapCell());
-    const snapHas = new Uint8Array(snapW * snapH);
-    const snapMarks = new Int32Array(snapW * snapH);
-    for (let row = 0; row < snapH; ++row) {
-        for (let col = 0; col < snapW; ++col) {
-            const cx = snapX0 + col;
-            const cy = snapY0 + row;
-            if (!r.cellExists(cx, cy))
-                continue;
-            const i = row * snapW + col;
-            snapHas[i] = 1;
-            snapMarks[i] = r.work.i(cx + side * cy, 14);
-            const mc = r.rawSlot(cx + (cy << 9));
-            snapCells[i] = mc !== null ? Object.assign(new MapCell(), mc) : new MapCell();
-        }
-    }
-
-    const restoreSnapshot = (): void => {
-        for (let row = 0; row < snapH; ++row) {
-            for (let col = 0; col < snapW; ++col) {
-                const i = row * snapW + col;
-                if (snapHas[i] === 0)
-                    continue;
-                const cx = snapX0 + col;
-                const cy = snapY0 + row;
-                r.work.setI(cx + side * cy, 14, snapMarks[i]!);
-                const mc = r.rawSlot(cx + (cy << 9));
-                if (mc !== null)
-                    Object.assign(mc, snapCells[i]!);
-            }
-        }
-    };
-
-    // ------------------------------------------------------------------
-    // 刻完回头验②（用户报障 2026-10-02：(89,116) 与 (92,116) 距离不够展开
-    // 两套 CliffSet，西木同款 bug）。
-    //
-    // 一条对接刻坡由三条坡带组成（R1..R10 = SlopeIndex 1..10）。坡带顶排
-    // 贴着 owner 高台（坡格 Level = ownerLevel-1，其上沿即 Level=ownerLevel
-    // 的纯高地顶面）。若某条坡带格的"侧向"（垂直于坡带走向、朝高台那一侧）
-    // 两格以内存在一个【刻坡前就已是、刻坡后仍是】的等高高地顶面格
-    // （SlopeIndex==0、Level == 坡格 Level+1），说明坡顶与旁边另一片高地
-    // 贴得太近——之后 PlaceCliffs 会在中间再补一道悬崖，两套 CliffSet 在
-    // 两三格内展不开，拼出白立面。命中就整块还原（三条对接坡带一起取消）。
-    //
-    // slope 朝向（用户给定，俯视）：
-    //   R1/R5 -> 左上(-1,-1)   R2/R7 -> 右下(+1,+1)
-    //   R3/R10-> 左下(-1,+1)   R4/R8 -> 右上(+1,-1)
-    // ------------------------------------------------------------------
-    const sideHighClash = (clash: { x: number, y: number, slope: number }): boolean => {
-        if (r.rampBaseIndex < 0)
-            return false;
-        const K_SX = [0, -1, 1, -1, 1, -1, 0, 1, 1, 0, -1];
-        const K_SY = [0, -1, 1, 1, -1, -1, 0, 1, -1, 0, 1];
-
-        for (let row = 0; row < snapH; ++row) {
-            for (let col = 0; col < snapW; ++col) {
-                const i = row * snapW + col;
-                if (snapHas[i] === 0)
-                    continue;
-
-                // [EXE-MATCH] 0x14001FF6D/0x14001FF75: the old cell comes from
-                // [rsp+18h] which the column-loop bottom (0x1400200E9
-                // `add r8,34h`) advances by one MapCell (52 B) per column, so
-                // the exe tests the snapshot's own (col,row) cell - not the
-                // row's first cell.
-                const oldC = snapCells[i]!;
-                const wx = snapX0 + col;
-                const wy = snapY0 + row;
-                const nowC = r.rawSlot(wx + (wy << 9));
-                if (nowC === null)
-                    continue;
-
-                // 仅看"本次新刻"的坡带格：刻前不是 rampBase 坡，刻后是。
-                const wasRamp = oldC.isoTileTypeIndex >= r.rampBaseIndex
-                    && oldC.isoTileTypeIndex <= r.rampBaseIndex + 19;
-                const isRamp = nowC.isoTileTypeIndex >= r.rampBaseIndex
-                    && nowC.isoTileTypeIndex <= r.rampBaseIndex + 19;
-                if (wasRamp || !isRamp || nowC.slopeIndex < 1
-                    || nowC.slopeIndex > 10)
-                    continue;
-
-                const slope = nowC.slopeIndex;
-                const sdx = K_SX[slope]!;
-                const sdy = K_SY[slope]!;
-                const needLevel = nowC.level + 1;         // 坡格上沿高台高度
-
-                for (let step = 1; step <= 2; ++step) {
-                    const qx = wx + sdx * step;
-                    const qy = wy + sdy * step;
-                    const qc = qx - snapX0;
-                    const qr = qy - snapY0;
-                    if (qc < 0 || qc >= snapW || qr < 0 || qr >= snapH)
-                        break;
-                    const qi = qr * snapW + qc;
-                    if (snapHas[qi] === 0)
-                        break;
-                    const qNow = r.rawSlot(qx + (qy << 9));
-                    if (qNow === null)
-                        break;
-                    const qOld = snapCells[qi]!;
-
-                    // 刻前即纯高地顶面、等高；刻后仍未被本次刻坡改动（依旧
-                    // 是同高度纯顶面）——即"旁边另一片没被纳入的高地"。
-                    if (qOld.slopeIndex === 0 && qOld.level === needLevel
-                        && qNow.slopeIndex === 0 && qNow.level === needLevel) {
-                        clash.x = qx;
-                        clash.y = qy;
-                        clash.slope = slope;
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    };
-
-    // builder 报成功之后过一遍上面的检查；不合格就整块还原，当这次没刻过。
-    const acceptBuilder = (builderResult: number): number => {
-        if (builderResult === 0)
-            return 0;
-
-        if (process.env.RMG_DEBUG_STAMP) {
-            const parts: string[] = [];
-            let markDeltas = 0;
-            let levelDeltas = 0;
-            for (let row = 0; row < snapH; ++row) {
-                for (let col = 0; col < snapW; ++col) {
-                    const i = row * snapW + col;
-                    if (snapHas[i] === 0)
-                        continue;
-                    const wx = snapX0 + col;
-                    const wy = snapY0 + row;
-                    const nowC = r.rawSlot(wx + (wy << 9));
-                    if (nowC === null)
-                        continue;
-                    if (nowC.slopeIndex >= 1 && nowC.slopeIndex <= 10
-                        && snapCells[i]!.slopeIndex !== nowC.slopeIndex)
-                        parts.push(`(${wx},${wy})L${nowC.level}R${nowC.slopeIndex}`);
-                    if (r.work.i(wx + side * wy, 14) !== snapMarks[i])
-                        ++markDeltas;
-                    if (nowC.level !== snapCells[i]!.level)
-                        ++levelDeltas;
-                }
-            }
-            diag(`RAMP-STAMP at=(${x},${y}) mask=${mask.toFixed(0)} ratio=${ratio} n=${parts.length} m=${markDeltas} l=${levelDeltas} ${parts.join(' ')}`);
-        }
-
-        const clash = { x: 0, y: 0, slope: 0 };
-        if (sideHighClash(clash)) {
-            diag(`RAMP-SIDE-CANCEL near=(${clash.x},${clash.y}) R${clash.slope} ownerL=${owner.level}`);
-            if (process.env.RMG_DEBUG_STAMP)
-                diag(`RAMP-ACC at=(${x},${y}) clash=(${clash.x},${clash.y})R${clash.slope}`);
-            restoreSnapshot();
-            return 0;
-        }
-
-        const blocksAfter = countOwnerHighBlocks();
-        if (process.env.RMG_DEBUG_STAMP)
-            diag(`RAMP-ACC at=(${x},${y}) blocks=${blocksAfter}/${ownerHighBlocksBefore}`);
-        if (blocksAfter <= ownerHighBlocksBefore)
-            return builderResult;
-        restoreSnapshot();
-        return 0;
-    };
+    // [20K-MATCH] 2026-11-18: the post-stamp acceptance layer (sideHighClash +
+    // owner-high block counting) is gone. Neither test exists in gamemd's
+    // CarveConnectorsOrBridges 0x005905D0 / TryCarveConnectorAtCell 0x005970 —
+    // the exe's refusals are all pre-stamp (RectIsCarveable + per-shape guards)
+    // and are already implemented in the builders / rampRectClear. Applying an
+    // extra post-hoc cancel changed the cancel set versus the exe (env3/4:
+    // exe 5 cancels vs TS 2). See vera20k phases/carve.rs::try_carve_connector_at_cell.
 
     let fromX: number, fromY: number, toX: number, toY: number;
 
@@ -1479,7 +1288,7 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
             ++fromY;                                      // 0x5909xx
         if ((mask & 0x04) !== 0)
             --toX;
-        carved = acceptBuilder(rampBuilder1(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId));   // 0x590a0x sub_593AF0
+        carved = rampBuilder1(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId);   // 0x590a0x sub_593AF0
     }
 
     if (carved === 0 && (mask & 0x0a) === 0x0a && (mask & 0x11) === 0) {
@@ -1489,7 +1298,7 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
             --toY;
         if ((mask & 0x01) !== 0)
             --fromX;
-        carved = acceptBuilder(rampBuilder2(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId));   // 0x590a5x sub_593550
+        carved = rampBuilder2(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId);   // 0x590a5x sub_593550
     }
 
     if (carved === 0 && (mask & 0x28) === 0x28 && (mask & 0x83) === 0) {
@@ -1499,7 +1308,7 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
             --toX;
         if ((mask & 0x04) !== 0)
             --fromY;
-        carved = acceptBuilder(rampBuilder3(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId));   // 0x590axx sub_593030
+        carved = rampBuilder3(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId);   // 0x590axx sub_593030
     }
 
     if (carved === 0 && (mask & 0xa0) === 0xa0 && (mask & 0x0e) === 0) {
@@ -1509,123 +1318,86 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
             ++toY;
         if ((mask & 0x10) !== 0)
             ++fromX;
-        carved = acceptBuilder(rampBuilder3(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId));   // 0x590bxx sub_593030
+        carved = rampBuilder3(r, owner, packXY(fromX, fromY), packXY(toX, toY), regionId);   // 0x590bxx sub_593030
     }
 
-// ------------------------------------------------------------------
-// [EXE-MATCH] 0x14001EDDB - 0x14001F50A: the four axis strips and the
-// four ratio > 0.5 fallbacks are RANDOM-COUNT STRIP LOOPS in the oracle
-// exe, not single fixed strips:
-//   - helper 0x14001F510 draws twice: n = clamp(F2I64(next * K_UNIT_SCALE
-//     * 4), 0, 3) and off = clamp(-n - F2I64((2n+1) * -(next2 *
-//     K_UNIT_SCALE)), -n, n);
-//   - helper 0x14001F660 draws once per row: with A2 = row + 5, half =
-//     A2/2 (C trunc), B = A2 - half, the coin flip (F2I64(next * 2^-31))
-//     picks (di, bx) = (half - A2, half) or (-half, B); the corners are
-//     from = pack(C - trunc(D/2), base ± di), to = pack(D + C - trunc(D/2),
-//     base ± bx) with D = the row's clamped offset and the sign per mode
-//     bit 0 — the D/2 is C TRUNC division (cdq;sub;sar), not >>1;
-//   - every row's builder result goes through acceptBuilder and the first
-//     nonzero result wins.
-// The fixed single-strip reading (with its two DrawZeroOrOne jitters) is a
-// post-build rewrite of the reference project - the exe never runs it.
-// ------------------------------------------------------------------
-    const stripPlan = (): { n: number; off: number } => {
-        let n = F2I64((r.rng.next() >>> 0) * K_UNIT_SCALE * 4.0);   // 0x14001F580-F5B5
-        if (n < 0)
-            n = 0;
-        if (n > 3)
-            n = 3;
-        const d2 = r.rng.next() >>> 0;                              // 0x14001F5C6-F601
-        let off = -n - F2I64((2 * n + 1) * -(d2 * K_UNIT_SCALE));   // 0x14001F60B-636
-        if (off < -n)
-            off = -n;
-        if (off > n)
-            off = n;
-        return { n, off };
-    };
-
-    const stripCorners = (mode: number, base: number, c: number, a: number, d: number): { from: number; to: number } => {
-        const a2 = a + 5;                                   // 0x14001F67B
-        const half = a2 >> 1;                               // 0x14001F693-F69B
-        const b = a2 - half;
-        const coin = F2I64((r.rng.next() >>> 0) * 4.656612874161595e-10);   // 0x14001F702-F70F
-        let di = i16(half - a2);                            // 0x14001F6E9-F6F3
-        let bx = i16(half);
-        if (coin === 0) {                                   // 0x14001F715-F71E
-            di = i16(-half);
-            bx = i16(b);
-        }
-        const c2 = i16(c - Math.trunc(d / 2));              // [EXE-MATCH] 0x14001F723-F72E: cdq;sub eax,edx;sar = C
-        const d2 = i16(d + c2);                             //   TRUNC div, NOT >>1 (floor): d=-1 gives 0 vs -1.
-        // out0 = eax | (C2 << 16): the mode-transformed base lands in the LOW
-        // half (X) and C2 in the HIGH half (Y) — 0x14001F793-F7B4.
-        const xf = (mode & 1) === 0 ? i16(di + base) : i16(base - di);   // 0x14001F747-F796
-        const xt = (mode & 1) === 0 ? i16(bx + base) : i16(base - bx);
-        return { from: packXY(xf, c2), to: packXY(xt, d2) };
-    };
-
-    // One axis/fallback entry: stripPlan + the row loop; the first accepted
-    // strip wins (exe 0x14001F467 jumps to the tail with a nonzero result).
-    const stripEntry = (mode: number, c: number, base: number, builder: (from: number, to: number) => number): number => {
-        const plan = stripPlan();
-        for (let i = plan.n; i >= 0; --i) {
-            const d = Math.max(-i, Math.min(plan.off, i));
-            const corners = stripCorners(mode, base, c, i, d);
-            if (process.env.RMG_DEBUG_STAMP)
-                diag(`RAMP-CORNERS mode=${mode} c=${c} base=${base} n=${plan.n} off=${plan.off} i=${i} d=${d} from=(${unpX(corners.from)},${unpYS(corners.from)}) to=(${unpX(corners.to)},${unpYS(corners.to)})`);
-            const bres = builder(corners.from, corners.to);
-            const r2 = acceptBuilder(bres);
-            if (r2 !== 0)
-                return r2;
-        }
-        return 0;
-    };
-
+    // [20K-MATCH] 2026-11-18: the four straight shapes now use gamemd's own
+    // endpoint formulas — exactly two 0/1 jitter draws per shape, and fixed
+    // geometry on the late-attempt fallbacks — as in vera20k
+    // phases/carve.rs::try_carve_connector_at_cell (0x00590970). The previous
+    // stripPlan/stripCorners random-count strip loops were the C++ rewrite's
+    // redesign (0x14001EDDB..), not gamemd, and desynced the draw stream.
     if (carved === 0 && (mask & 0x70) === 0 && (mask & 0x88) !== 0) {
-        const jit = ((mask >>> 7) & 1) - ((mask & 0x08) !== 0 ? 1 : 0);   // 0x14001EDEF
-        carved = stripEntry(2, i16(x - 1), i16(y + jit), (from, to) => rampBuilder4(r, owner, from, to, regionId));
+        // ClearWest: a = north endpoint, b = south endpoint.
+        let ay = (mask & 0x80) !== 0 ? y - 3 : y - 4;
+        let by = (mask & 0x80) !== 0 ? y + 5 : y + 4;
+        if ((mask & 0x08) !== 0) { --ay; --by; }
+        const ax = x - 1 + drawZeroOrOne(r);
+        const bx = x - 1 + drawZeroOrOne(r);
+        carved = rampBuilder4(r, owner,
+            packXY(i16(ax), i16(ay)), packXY(i16(bx), i16(by)), regionId);
     }
 
     if (carved === 0 && (mask & 0x07) === 0 && (mask & 0x88) !== 0) {
-        const jit = ((mask >>> 7) & 1) - ((mask & 0x08) !== 0 ? 1 : 0);   // 0x14001EEC8
-        carved = stripEntry(3, i16(x + 1), i16(y + jit), (from, to) => rampBuilder6(r, owner, from, to, regionId));
+        // ClearEast: a = south endpoint, b = north endpoint.
+        let ay = (mask & 0x80) !== 0 ? y + 5 : y + 4;
+        let by = (mask & 0x80) !== 0 ? y - 3 : y - 4;
+        if ((mask & 0x08) !== 0) { --ay; --by; }
+        const ax = x + drawZeroOrOne(r);                  // x + 1 + jitter - 1
+        const bx = x + drawZeroOrOne(r);
+        carved = rampBuilder6(r, owner,
+            packXY(i16(ax), i16(ay)), packXY(i16(bx), i16(by)), regionId);
     }
 
     if (carved === 0 && (mask & 0xc1) === 0 && (mask & 0x22) !== 0) {
-        const jit = ((mask >>> 5) & 1) - ((mask & 0x02) !== 0 ? 1 : 0);   // 0x14001EF98
-        carved = stripEntry(1, i16(y - 1), i16(x + jit), (from, to) => rampBuilder5(r, owner, from, to, regionId));
+        // ClearNorth: a = east endpoint, b = west endpoint.
+        let ax = (mask & 0x20) !== 0 ? x + 5 : x + 4;
+        let bx = (mask & 0x20) !== 0 ? x - 3 : x - 4;
+        if ((mask & 0x02) !== 0) { --ax; --bx; }
+        const ay = y - 1 + drawZeroOrOne(r);
+        const by = y - 1 + drawZeroOrOne(r);
+        carved = rampBuilder5(r, owner,
+            packXY(i16(ax), i16(ay)), packXY(i16(bx), i16(by)), regionId);
     }
 
     if (carved === 0 && (mask & 0x1c) === 0 && (mask & 0x22) !== 0) {
-        const jit = ((mask >>> 5) & 1) - ((mask & 0x02) !== 0 ? 1 : 0);   // 0x14001F06E
-        carved = stripEntry(0, i16(y + 1), i16(x + jit), (from, to) => rampBuilder7(r, owner, from, to, regionId));
+        // ClearSouth: a = west endpoint, b = east endpoint.
+        let ax = (mask & 0x20) !== 0 ? x - 3 : x - 4;
+        let bx = (mask & 0x20) !== 0 ? x + 5 : x + 4;
+        if ((mask & 0x02) !== 0) { --ax; --bx; }
+        const ay = y + drawZeroOrOne(r);                  // y + 1 + jitter - 1
+        const by = y + drawZeroOrOne(r);
+        carved = rampBuilder7(r, owner,
+            packXY(i16(ax), i16(ay)), packXY(i16(bx), i16(by)), regionId);
     }
 
-    // The second sweep runs only for the later tries (ratio > 0.5), with the
-    // same random-count strip loops.
-    if (ratio > 0.5 && carved === 0) {                    // 0x590d7x / 0x14001F127
-        if ((mask & 0x08) === 0) {                        // 0x14001F13C
-            carved = stripEntry(0, i16(y + 1), i16(x), (from, to) => rampBuilder7(r, owner, from, to, regionId));
+    // Late-attempt fallbacks: fixed geometry, no jitter, gate at leniency > 0.5
+    // (attempt 51 upward). The south bit gates the first AND third shape in
+    // gamemd — deliberately, per vera20k's note.
+    if (ratio > 0.5 && carved === 0) {                    // 0x590d7x
+        if ((mask & 0x08) === 0) {
+            carved = rampBuilder7(r, owner,
+                packXY(i16(x - 4), i16(y + 1)), packXY(i16(x + 4), i16(y + 1)), regionId);
         }
 
-        if (carved === 0) {
-            if ((mask & 0x02) === 0) {                    // 0x14001F1FD
-                carved = stripEntry(3, i16(x + 1), i16(y), (from, to) => rampBuilder6(r, owner, from, to, regionId));
-            }
+        if (carved === 0 && (mask & 0x02) === 0) {
+            carved = rampBuilder6(r, owner,
+                packXY(i16(x + 1), i16(y + 4)), packXY(i16(x + 1), i16(y - 4)), regionId);
+        }
 
-            if (carved === 0) {
-                if ((mask & 0x08) === 0) {                // 0x14001F2C0
-                    carved = stripEntry(1, i16(y - 1), i16(x), (from, to) => rampBuilder5(r, owner, from, to, regionId));
-                }
+        if (carved === 0 && (mask & 0x08) === 0) {
+            carved = rampBuilder5(r, owner,
+                packXY(i16(x + 4), i16(y - 1)), packXY(i16(x - 4), i16(y - 1)), regionId);
+        }
 
-                if (carved === 0 && (mask & 0x20) === 0) {   // 0x14001F37A
-                    carved = stripEntry(2, i16(x - 1), i16(y), (from, to) => rampBuilder4(r, owner, from, to, regionId));
-                }
-            }
+        if (carved === 0 && (mask & 0x20) === 0) {
+            carved = rampBuilder4(r, owner,
+                packXY(i16(x - 1), i16(y - 4)), packXY(i16(x - 1), i16(y + 4)), regionId);
         }
     }
 
+    if (process.env.RMG_DEBUG_STAMP && carved !== 0)
+        diag(`RAMP-CARVED at=(${x},${y}) mask=${mask} ratio=${ratio}`);
     return carved;
 }
 
@@ -1728,11 +1500,20 @@ export function rampRectClear(r: Rmg, owner: MapRegion | null, x: number, y: num
     if (owner === null || r.work.count === 0)
         return false;
 
-    if (!isWithinUsableArea(r, packXY(i16(x), i16(y)), true)
-        || !isWithinUsableArea(r, packXY(i16(x + w - 1), i16(y)), true)
-        || !isWithinUsableArea(r, packXY(i16(x), i16(y + h - 1)), true)
-        || !isWithinUsableArea(r, packXY(i16(x + w - 1), i16(y + h - 1)), true))
-        return false;
+    // Stage 1: the four corners, exactly as 0x00594010 asks — MapClass's
+    // height-aware playfield test, which is algebraically our
+    // isWithinUsableArea (base/off_fc/off_100/off_104/off_108 ↔
+    // mapWidth/visX/visY/visW/visH). No extra band: the exe admits rects that
+    // reach outside the local rect, and the fills are expected to spill.
+    const corners: Array<[number, number]> = [
+        [x, y], [x + w - 1, y], [x, y + h - 1], [x + w - 1, y + h - 1],
+    ];
+    for (const [cx, cy] of corners) {
+        if (!r.cellExists(i16(cx), i16(cy)))
+            return false;
+        if (!isWithinUsableArea(r, packXY(i16(cx), i16(cy)), true))
+            return false;
+    }
 
     const side = r.size.workSide;
     for (let row = y; row < y + h; ++row) {
@@ -1745,25 +1526,13 @@ export function rampRectClear(r: Rmg, owner: MapRegion | null, x: number, y: num
         }
     }
 
-    // [EXE-MATCH] 0x14002057E-0x140020690: the halo scan rejects a strip whose
-    // ±2 neighbourhood holds a THIRD region's cell at or above the OWNER's
-    // level + 1 (the earlier target-level+2 reading was a port guess that
-    // rejected whole plateaus the exe happily carves past).
-    {
-        const highEnough = owner.level + 1;
-        for (let row = y - 2; row <= y + h + 1; ++row) {
-            for (let col = x - 2; col <= x + w + 1; ++col) {
-                if (!r.cellExists(i16(col), i16(row)))
-                    continue;
-                const m = r.work.i(col + side * row, 14);
-                if (m <= 0 || m === owner.id || m === targetId)
-                    continue;
-                const mc = r.cellAt(i16(col), i16(row));
-                if (mc.level >= highEnough)
-                    return false;
-            }
-        }
-    }
+    // [20K-MATCH] 2026-11-18: removed the ±2 halo scan that rejected strips
+    // neighbouring a third region's high ground. gamemd's RectIsCarveable
+    // (0x00594010) is only the two stages above — four playfield corners, then
+    // every cell owned by region/lower_region and bare. See vera20k
+    // src/map/rmg/phases/ramp.rs::rect_is_carveable. The halo test was a port
+    // invention; it refused ramps the exe carves and desynced the env3/4
+    // cancel set.
     return true;
 }
 
@@ -1771,8 +1540,16 @@ export function rampRectClear(r: Rmg, owner: MapRegion | null, x: number, y: num
 // sub_593AF0 - the first ramp builder: the module stamping plus the three ramp
 // bands of one ramp (0x593af0 - 0x593ffe). No RNG.
 // ---------------------------------------------------------------------------
+function traceRampBuilder(which: number, from: number, to: number, targetId: number): void {
+    if (!process.env.RMG_DEBUG_STAMP)
+        return;
+    diag(`RAMP-BUILD b${which} from=(${unpX(from)},${unpYS(from)})`
+        + ` to=(${unpX(to)},${unpYS(to)}) tgt=${targetId}`);
+}
+
 export function rampBuilder1(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(1, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -1899,6 +1676,7 @@ export function rampBuilder1(r: Rmg, owner: MapRegion | null, from: number, to: 
 // ---------------------------------------------------------------------------
 export function rampBuilder2(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(2, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -2030,6 +1808,7 @@ export function rampBuilder2(r: Rmg, owner: MapRegion | null, from: number, to: 
 // ---------------------------------------------------------------------------
 export function rampBuilder3(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(3, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -2155,6 +1934,7 @@ export function rampBuilder3(r: Rmg, owner: MapRegion | null, from: number, to: 
 // ---------------------------------------------------------------------------
 export function rampBuilder4(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(4, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -2321,6 +2101,7 @@ export function rampBuilder4(r: Rmg, owner: MapRegion | null, from: number, to: 
 // ---------------------------------------------------------------------------
 export function rampBuilder5(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(5, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -2475,6 +2256,7 @@ export function rampBuilder5(r: Rmg, owner: MapRegion | null, from: number, to: 
 // ---------------------------------------------------------------------------
 export function rampBuilder6(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(6, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -2626,6 +2408,7 @@ export function rampBuilder6(r: Rmg, owner: MapRegion | null, from: number, to: 
 // ---------------------------------------------------------------------------
 export function rampBuilder7(r: Rmg, owner: MapRegion | null, from: number, to: number,
                              targetId: number): number {
+    traceRampBuilder(7, from, to, targetId);
     if (owner === null || r.work.count === 0)
         return 0;
 
@@ -2872,9 +2655,11 @@ export function placeBridgeRepairHut(r: Rmg, x: number, y: number, w: number, h:
     for (let row = y; row < y + h + 1; ++row) {           // 0x5904xx
         for (let col = x; col < x + w + 1; ++col) {
             const cell = r.cellAt(col, row);
-            // vanilla: OverlayTypeIndex == -1 && placeholder tile && !FirstObject.
-            // The port carries "occupied" in the cell's AltFlags instead.
-            if (cell.overlayTypeIndex === -1 && r.isPlaceholderTile(cell)
+            // vanilla: OverlayTypeIndex == -1 && clear tile (TileTypeIndex 0 or
+            // -1) && !FirstObject; the port carries "occupied" in AltFlags.
+            const clearTile = cell.isoTileTypeIndex === r.clearTileIndex
+                || cell.isoTileTypeIndex === -1;
+            if (cell.overlayTypeIndex === -1 && clearTile
                 && (cell.altFlags & K_ALT_CELL_FLAGS_CONTAINS_BUILDING) === 0) {
                 createNeutralBridgeRepairHut(r,
                     packXY(i16(col), i16(row)));          // 0x5905b2
@@ -2926,8 +2711,7 @@ export function corridorBandClear(r: Rmg, x: number, y: number, horizontal: bool
 }
 
 // ---------------------------------------------------------------------------
-// sub_58F2C0 - the paved lateral-corridor builder (0x58f2c0 - 0x5902bf). Up to
-// 200 attempts; the vanilla returns the success flag, the caller discards it.
+// sub_58F2C0 - the paved lateral-corridor builder (0x58f2c0 - 0x5902bf). Up to// 200 attempts; the vanilla returns the success flag, the caller discards it.
 // ---------------------------------------------------------------------------
 export function linkSameLevelRegions(r: Rmg, water: MapRegion | null,
                                      regionA: MapRegion | null,
@@ -3022,6 +2806,14 @@ export function linkSameLevelRegions(r: Rmg, water: MapRegion | null,
             } else {
                 for (;;) {
                     ++X_2;
+                    if (process.env.RMG_DEBUG_STAMP)
+                        diag(`DECK-EW-STEP t=${tries} x=${X_2} y=${Y_2}`
+                            + ` t1=${r.cellAt(X_2, Y_2).isoTileTypeIndex}/${r.cellAt(X_2, Y_2).level}`
+                            + ` t2=${r.cellAt(X_2, Y_2 + 2).isoTileTypeIndex}/${r.cellAt(X_2, Y_2 + 2).level}`
+                            + ` use1=${isWithinUsableArea(r, packXY(i16(X_2), i16(Y_2)), true) ? 1 : 0}`
+                            + ` use2=${isWithinUsableArea(r, packXY(i16(X_2), i16(Y_2 + 2)), true) ? 1 : 0}`
+                            + ` cliff1=${isCliffFamilyTile(r, r.cellAt(X_2, Y_2)) ? 1 : 0}`
+                            + ` cliff2=${isCliffFamilyTile(r, r.cellAt(X_2, Y_2 + 2)) ? 1 : 0}`);
                     if (!corridorBandClear(r, X_2, Y_2, false))
                         break;
                     if (tileRectClear(r, X_2, Y_2, 1, 3, false, false)) {
@@ -3030,9 +2822,18 @@ export function linkSameLevelRegions(r: Rmg, water: MapRegion | null,
                     }
                 }
             }
-            if (!reached || !tileRectClear(r, X_2 + 1, Y_2, 3, 3, false, false))   // 0x58f846
-                v50 = false;
+            if (!reached || !tileRectClear(r, X_3 - 3, Y_3, 3, 3, false, false))   // 0x58f846
+                v50 = false;                          // [20K-MATCH] the ew end probe is
+                                                      // west.0-3, not east.0+1
+            if (process.env.RMG_DEBUG_STAMP)
+                diag(`DECK-EW t=${tries} seed=(${cx},${cy}) west=${X_3},${Y_3}`
+                    + ` east=${X_2},${Y_2} reached=${reached ? 1 : 0}`
+                    + ` initW=${tileRectClear(r, X_3, Y_3, 1, 3, false, false) ? 1 : 0}`
+                    + ` westGate=${tileRectClear(r, X_3 - 3, Y_3, 3, 3, false, false) ? 1 : 0}`
+                    + ` eastGate=${tileRectClear(r, X_2 + 1, Y_2, 3, 3, false, false) ? 1 : 0}`);
         } else {
+            if (process.env.RMG_DEBUG_STAMP)
+                diag(`DECK-EW t=${tries} seed=(${cx},${cy}) westGate0=0`);
             v50 = false;                                  // 0x58f8xx
         }
 
@@ -3074,6 +2875,10 @@ export function linkSameLevelRegions(r: Rmg, water: MapRegion | null,
         }
 
         // 4. the corridor rectangle and the length budget (0x58f9xx)
+        if (process.env.RMG_DEBUG_STAMP)
+            diag(`DECK-MARK t=${tries} v49=${v49 ? 1 : 0} v50=${v50 ? 1 : 0} v25=${v25 ? 1 : 0}`
+                + ` len=${vLen}/${n999} marks=${markV20}/${markV21}/${markH67}/${markH22}`
+                + ` A=${idA} B=${idB} seed=(${cx},${cy})`);
         let X_4 = 0, Y_5 = 0, n3_8 = 0, n3_9 = 0;
         const budget = Math.trunc(tries / 25) + 8;        // n999_1
         if (v25 && n999 < budget) {
@@ -3091,6 +2896,8 @@ export function linkSameLevelRegions(r: Rmg, water: MapRegion | null,
         }
         if (n3_8 <= 0 || n3_9 <= 0)                       // LABEL_128
             continue;
+        if (process.env.RMG_DEBUG_STAMP)
+            diag(`DECK-RECT t=${tries} v49=${v49 ? 1 : 0} v50=${v50 ? 1 : 0} rect=${X_4},${Y_5},${n3_8},${n3_9}`);
 
         if (v50) {                                        // the horizontal corridor
             if (!overlayRectClear(r, X_4, Y_5, n3_8, n3_9))    // 0x58fa66
