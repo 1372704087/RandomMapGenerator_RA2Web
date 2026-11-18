@@ -18,3 +18,7 @@ packages/*/.cache/
 
 # 非温带/雪地 theater 的 TMP 瓦片（游戏素材，用 scripts/extract-theater-tiles.mjs 现抽）
 packages/server/resources/theater-tiles/
+
+# 根目录的一次性 cncmaps 预览产物 / 旧服务日志
+/????????_e*_s*.png
+/.tmp_server*.log
