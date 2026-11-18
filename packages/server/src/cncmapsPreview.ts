@@ -3,11 +3,23 @@
  *
  * 主后端把生成好的地图上传给它自己的 cncmaps Web 服务（默认 127.0.0.1:5174），
  * 请求 1600px 的缩略预览，再把 PNG 返回给前端。渲染是独立子进程，所以这里
- * 串行化请求，避免两个 500×500 渲染同时吃掉几 GB 内存。
+ * 串行化请求，避免两个大图渲染同时吃掉几 GB 内存。
+ *
+ * 同一份地图（内容哈希）+ 同一个预览宽度只渲一次：结果落盘缓存，重复生成同一种子
+ * 时直接命中，省掉一整次 spawn + 画布分配。
  */
+
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const CNCMAPS_WEB_URL = (process.env.CNCMAPS_WEB_URL ?? 'http://127.0.0.1:5174').replace(/\/+$/, '');
 const PREVIEW_TIMEOUT_MS = 180_000;
+
+/** 预览缓存目录（内容哈希作文件名，与地图名无关）。 */
+const CACHE_DIR = process.env.CNCMAPS_CACHE_DIR ?? path.resolve(process.cwd(), '.cache', 'cncmaps');
+/** 缓存上限，超过按最久未用淘汰。 */
+const CACHE_MAX_BYTES = Number(process.env.CNCMAPS_CACHE_BYTES ?? 512 * 1024 * 1024);
 
 export class CncmapsPreviewError extends Error {
   readonly statusCode: number;
@@ -26,8 +38,8 @@ let renderChain: Promise<unknown> = Promise.resolve();
  * （`TileLayer.getTile` 拿到 undefined）。所以先带标记渲染，失败就退回不带标记
  * 重渲一次——地图本体能出图，比因为一层记号整张图 502 好。
  *
- * 超大图（500×500 这种，全尺寸画布约 3000 万～4 亿像素）再加标记层会直接把子进程
- * 的堆撑爆（exit 134 / SIGABRT）。所以超过阈值时干脆不带标记，省一次必崩的重渲。
+ * 超大图（Size 报得很大）再加标记层会把子进程的堆撑爆（exit 134 / SIGABRT）。
+ * 所以超过阈值时干脆不带标记，省一次必崩的重渲。
  */
 export function renderCncmapsPreview(
   mapContent: string,
@@ -35,7 +47,19 @@ export function renderCncmapsPreview(
   previewWidth = 1600,
 ): Promise<Buffer> {
   const heavy = projectedPixels(mapContent) > MARKER_MAX_PIXELS;
-  const job = renderChain.then(() => doRender(mapContent, name, previewWidth, !heavy));
+  const width = Math.min(2048, Math.max(400, Math.round(previewWidth)));
+  const key = cacheKey(mapContent, width, !heavy);
+
+  const cached = readCache(key);
+  if (cached) return Promise.resolve(cached);
+
+  const job = renderChain.then(async () => {
+    const again = readCache(key); // 排队期间别人可能已经渲好
+    if (again) return again;
+    const png = await doRender(mapContent, name, previewWidth, !heavy);
+    writeCache(key, png);
+    return png;
+  });
   renderChain = job.then(
     () => undefined,
     () => undefined,
@@ -46,15 +70,73 @@ export function renderCncmapsPreview(
 /** 标记层允许的最大投影像素数（菱形投影：宽 ×2，高 ×1）。 */
 const MARKER_MAX_PIXELS = 120_000_000;
 
-/** 从 `[Map] Size=w,h` 估投影像素数；解析不出来就当作小图。 */
+/** 从 `[Map] Size=x,y,w,h` 估投影像素数；解析不出来就当作小图。 */
 function projectedPixels(mapContent: string): number {
-  const m = /\[Map\][^\[]*\bSize\s*=\s*(\d+)\s*,\s*(\d+)/i.exec(mapContent.slice(0, 4096));
+  const m = /\[Map\][^\[]*\bSize\s*=\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(
+    mapContent.slice(0, 4096),
+  );
   if (!m) return 0;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
+  const w = Number(m[3]);
+  const h = Number(m[4]);
   if (!Number.isFinite(w) || !Number.isFinite(h)) return 0;
   // NumberedTileData 以菱形铺开：列 = 2w，行 = h
   return 2 * w * h;
+}
+
+function cacheKey(mapContent: string, width: number, markers: boolean): string {
+  const hash = crypto.createHash('sha1').update(mapContent, 'utf8').digest('hex');
+  return `${hash}_w${width}${markers ? '_m' : ''}`;
+}
+
+function readCache(key: string): Buffer | null {
+  try {
+    const file = path.join(CACHE_DIR, `${key}.png`);
+    const buf = fs.readFileSync(file);
+    const now = new Date();
+    fs.utimesSync(file, now, now); // 触碰 mtime，LRU 淘汰按它排序
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(key: string, png: Buffer): void {
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CACHE_DIR, `${key}.png`), png);
+    pruneCache();
+  } catch {
+    // 缓存只是加速，写不进去不影响出图
+  }
+}
+
+/** 超出上限时删最久未用的文件。 */
+function pruneCache(): void {
+  let files: { file: string; size: number; at: number }[];
+  try {
+    files = fs
+      .readdirSync(CACHE_DIR)
+      .filter((f) => f.endsWith('.png'))
+      .map((f) => {
+        const full = path.join(CACHE_DIR, f);
+        const st = fs.statSync(full);
+        return { file: full, size: st.size, at: st.mtimeMs };
+      });
+  } catch {
+    return;
+  }
+  let total = files.reduce((n, f) => n + f.size, 0);
+  if (total <= CACHE_MAX_BYTES) return;
+  files.sort((a, b) => a.at - b.at);
+  for (const f of files) {
+    if (total <= CACHE_MAX_BYTES) break;
+    try {
+      fs.unlinkSync(f.file);
+      total -= f.size;
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 async function doRender(

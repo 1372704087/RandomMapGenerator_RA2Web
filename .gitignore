@@ -11,3 +11,7 @@ temp/
 .tmp_oracle/
 .tmp_cxx/
 re/out/
+
+# cncmaps 预览缓存（内容哈希 PNG，按需重建）
+.cache/
+packages/*/.cache/

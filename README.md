@@ -38,6 +38,9 @@ pnpm dev:web
 | `NODE_OPTIONS` | 脚本设为 `--max-old-space-size=8192`，子进程继承 |
 
 主后端可用 `CNCMAPS_WEB_URL` 指向别的渲染服务（默认 `http://127.0.0.1:5174`）。
+预览结果按「地图内容 sha1 + 预览宽度」缓存在 `packages/server/.cache/cncmaps/`，
+同一种子重复生成直接命中（1 s → 14 ms）；`CNCMAPS_CACHE_DIR` / `CNCMAPS_CACHE_BYTES`
+（默认 512 MB，LRU 淘汰）可调。
 
 ## 项目结构
 
