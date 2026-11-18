@@ -632,8 +632,19 @@ export function recalcCellPassability(r: Rmg, cell: MapCell): void {
 // Four mask-style LAT blocks (neighbour mask -> familyBase + mask, plain tile
 // when the mask is 0), then the RampBase / RampSmooth slope-piece selection.
 // ---------------------------------------------------------------------------
-export function setupLAT(r: Rmg, cell: MapCell): void {
-    const cx = (cell.mapCoords & 0xffff) << 16 >> 16;
+/**
+ * Diagnostic switch: the two SetupLAT calls inside RecalcAttributes.
+ *
+ * vanilla's RecalcAttributes (0x47D2B0) has no call into 0x47CA80 in the
+ * decomp; the LAT/slope fixup is a separate sweep. Set RMG_NO_RECALC_LAT=1 to
+ * drop the inline calls and compare.
+ */
+export function setupLATWhenEnabled(r: Rmg, cell: MapCell): void {
+    if (process.env.RMG_NO_RECALC_LAT === '1') return;
+    setupLAT(r, cell);
+}
+
+export function setupLAT(r: Rmg, cell: MapCell): void {    const cx = (cell.mapCoords & 0xffff) << 16 >> 16;
     const cy = ((cell.mapCoords >>> 16) << 16) >> 16;
 
     // A neighbour by Neighbours index. Off-map reads give the sentinel cell,
@@ -684,35 +695,47 @@ export function setupLAT(r: Rmg, cell: MapCell): void {
     // ---- 5. RampBase / RampSmooth: slope piece selection (0x47cc80) --------
     if (r.rampBaseIndex !== -1 && r.rampSmoothIndex !== -1) {
         const cur = cell.isoTileTypeIndex;
+        const c0 = cur;
         if ((cur >= r.rampBaseIndex && cur <= r.rampBaseIndex + 19)
             || (cur >= r.rampSmoothIndex && cur <= r.rampSmoothIndex + 11)) {
             let mask = 0;
-            if (cell.slopeIndex === 1) // W, NE
+            // vera20k slope_fixed_tile: the pairs are CARDINAL slots in the
+            // native order N,E,S,W -> slope 1 (W,E), 2 (N,S), 3 (E,W),
+            // 4 (S,N). `at()` here is the 8-way Neighbours order, so the four
+            // cardinals are N=0, E=2, S=4, W=6.
+            if (cell.slopeIndex === 1) // W, E
             {
                 mask = at(6).slopeIndex === 0 ? 1 : 0;
-                if (at(1).slopeIndex === 0) mask |= 2;
+                if (at(2).slopeIndex === 0) mask |= 2;
                 if (mask !== 0) cell.isoTileTypeIndex = mask + r.rampSmoothIndex - 1;
             }
-            if (cell.slopeIndex === 2) // N, E
+            if (cell.slopeIndex === 2) // N, S
             {
                 if (at(0).slopeIndex === 0) mask |= 1;
-                if (at(2).slopeIndex === 0) mask |= 2;
+                if (at(4).slopeIndex === 0) mask |= 2;
                 if (mask !== 0) cell.isoTileTypeIndex = mask + r.rampSmoothIndex + 2;
             }
-            if (cell.slopeIndex === 3) // NE, W
+            if (cell.slopeIndex === 3) // E, W
             {
-                if (at(1).slopeIndex === 0) mask |= 1;
+                if (at(2).slopeIndex === 0) mask |= 1;
                 if (at(6).slopeIndex === 0) mask |= 2;
                 if (mask !== 0) cell.isoTileTypeIndex = mask + r.rampSmoothIndex + 5;
             }
-            if (cell.slopeIndex === 4) // E, N
+            if (cell.slopeIndex === 4) // S, N
             {
-                if (at(2).slopeIndex === 0) mask |= 1;
+                if (at(4).slopeIndex === 0) mask |= 1;
                 if (at(0).slopeIndex === 0) mask |= 2;
                 if (mask !== 0) cell.isoTileTypeIndex = mask + r.rampSmoothIndex + 8;
             }
             if (mask === 0)
                 cell.isoTileTypeIndex = cell.slopeIndex + r.rampBaseIndex - 1;
+            if (process.env.RMG_DEBUG_SLOPE === '1')
+                console.log(`SLOPE (${(cell.mapCoords & 0xffff) << 16 >> 16},` +
+                    `${(cell.mapCoords >>> 16) << 16 >> 16}) was=${c0} slope=${cell.slopeIndex}` +
+                    ` mask=${mask} -> ${cell.isoTileTypeIndex}` +
+                    ` n0=${at(0).slopeIndex} n2=${at(2).slopeIndex}` +
+                    ` n4=${at(4).slopeIndex} n6=${at(6).slopeIndex}` +
+                    ` lvl=${cell.level}`);
         }
     }
 
@@ -795,7 +818,7 @@ export function recalcAttributes(r: Rmg, cell: MapCell, cellLevel: number): void
             if (cliffBack() && r.cliffBackImpassability === 2)
                 cell.landType = 3; // LandType_Rock
 
-            setupLAT(r, cell);
+            setupLATWhenEnabled(r, cell);
             recalcCellPassability(r, cell);
             storePassability();
             return;
@@ -840,7 +863,7 @@ export function recalcAttributes(r: Rmg, cell: MapCell, cellLevel: number): void
         }
 
         cell.slopeIndex = tileCellRampType(r, tile, height) & 0xff;
-        setupLAT(r, cell);
+        setupLATWhenEnabled(r, cell);
 
         // ---- overlay / ore reconciliation (0x47d4xx LABEL_40) ------------
         let landType: number;

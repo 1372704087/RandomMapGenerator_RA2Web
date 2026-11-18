@@ -74,8 +74,6 @@ import {
     isMiscPaveTile,
     isPaveTile,
     cliffCellsInX,
-    cliffPieceHitsRamp,
-    trimCliffPieceForRamp,
 } from './river';
 import {
     releaseRegionObject,
@@ -92,8 +90,8 @@ export {
     isWaterFamilyTile,
     isGreenGroundTile,
 } from './river';
-import { buildWaterRing, repairCliffPieces } from './river';
-export { buildWaterRing, repairCliffPieces };
+import { buildWaterRing } from './river';
+export { buildWaterRing };
 
 // ---------------------------------------------------------------------------
 // Constants (MapGenMakingSub.cpp anonymous namespace).
@@ -837,7 +835,7 @@ export function legalizeRegionLevels(r: Rmg): void {
  * 的 0x58EF10（AssignRemainingCells 之后直接邻接 + 坡道）。仅用于与
  * `tools/rmg_oracle/bridge_pass` 的对拍与回归；正常出图保持 false。
  */
-let gamemdStrict = false;
+let gamemdStrict = process.env.RMG_STRICT === '1';
 export function setGamemdStrict(on: boolean): void {
     gamemdStrict = on;
 }
@@ -1017,6 +1015,11 @@ export function cliffMask(r: Rmg, cell: MapCell | null): number {
         return 0;
 
     const level = cell.level;
+    // Native reads Cell+11B as a SIGNED byte and adds 4 in i32, then compares
+    // against the neighbour's signed byte (vera20k ring_mask: `cell.level as i8`
+    // both sides). A level of 124 therefore looks for 128, which no signed byte
+    // can equal.
+    const target = ((level << 24) >> 24) + 4;
     const K_BIT = [0x80, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40];
 
     let mask = 0;
@@ -1026,7 +1029,7 @@ export function cliffMask(r: Rmg, cell: MapCell | null): number {
         if (!r.cellExists(nx, ny))                        // CoordinatesLegal
             continue;
         const n = r.cellAt(nx, ny);
-        if (n.level !== level + 4)                        // exactly one level up
+        if (((n.level << 24) >> 24) !== target)           // exactly one level up
             continue;
         if (isCliffFamilyTile(r, n))                      // !sub_4863D0(n)
             continue;
@@ -1407,7 +1410,7 @@ export function carveRampAt(r: Rmg, owner: MapRegion, coords: number, regionId: 
 // never repeats).
 // ---------------------------------------------------------------------------
 export function drawZeroOrOne(r: Rmg): number {
-    return F2I64(r.rng.next() * 4.656612874161595e-10);
+    return F2I64(r.rng.next() * 4.656612873077393e-10);
 }
 
 // ---------------------------------------------------------------------------
@@ -1663,6 +1666,9 @@ export function rampBuilder1(r: Rmg, owner: MapRegion | null, from: number, to: 
             cell.level = ownerLevel - n - 1;
             cell.isoTileTypeIndex = r.rampBaseIndex + 3;
             cell.height = 0;
+            if (process.env.RMG_DEBUG_STAMP)
+                diag(`FLATRUN cell=(${cell.mapCoords & 0xffff},`
+                    + `${cell.mapCoords >>> 16}) lvl=${cell.level} base=${r.rampBaseIndex}`);
         }
     }
 
@@ -2542,6 +2548,9 @@ export function rampBuilder7(r: Rmg, owner: MapRegion | null, from: number, to: 
             cell.level = ownerLevel - n - 1;
             cell.isoTileTypeIndex = r.rampBaseIndex + 3;
             cell.height = 0;
+            if (process.env.RMG_DEBUG_STAMP)
+                diag(`FLATRUN cell=(${cell.mapCoords & 0xffff},`
+                    + `${cell.mapCoords >>> 16}) lvl=${cell.level} base=${r.rampBaseIndex}`);
         }
     }
 
@@ -3163,9 +3172,6 @@ export function placeCliffs(r: Rmg): void {
     if (r.cellSlots.length === 0)
         return;
 
-    // Port extension: fresh per-map footprint outcomes for RepairCliffPieces.
-    r.cliffStamps.length = 0;
-
     const workCount = r.size.workSide * r.size.workSide;
 
     // ---- 1. Work array, on demand (0x578e6x) ------------------------------
@@ -3320,36 +3326,6 @@ export function placeCliffPiece(r: Rmg, cell: MapCell, genCode: number): boolean
     }
 
     // place:
-    // 多格"纯墙条"只剩一格能落时，撞坡修剪会把幸存格换成内角片 C34，朝向
-    // 不对、和两侧崖线接不上。这里在落片前直接改选与墙面同向的单格墙头片。
-    {
-        const sx = i16(unpX(cell.mapCoords));
-        const sy = i16(unpYS(cell.mapCoords));
-        if (slot >= 35 && slot <= 37) {
-            const southY = i16(sy + 1);
-            if (r.cellExists(sx, southY) && !r.isPlaceholderTile(r.cellAt(sx, southY)))
-                slot = 38;
-        } else if (slot >= 23 && slot <= 25) {
-            const eastX = i16(sx + 1);
-            if (r.cellExists(eastX, sy) && !r.isPlaceholderTile(r.cellAt(eastX, sy)))
-                slot = 26;
-        }
-    }
-    // Port guard: refuse a piece whose wall would ride down a ramp body. The
-    // surviving footprint cells are still stamped as smaller CliffSet pieces
-    // (C8 / C34 / C12-14), so a ramp-top seam keeps its facade instead of
-    // being flattened to t0.
-    if (cliffPieceHitsRamp(r, cell, slot)) {
-        const trimmed = trimCliffPieceForRamp(r, cell, slot);
-        if (trimmed > 0)
-            return true;
-        // Every wall cell of this piece rides a ramp or is already taken by
-        // ramp art. Place nothing.
-        const cx = i16(unpX(cell.mapCoords));
-        const cy = i16(unpYS(cell.mapCoords));
-        diag(`CLIFF-TRIM-SKIP slot=${slot} anchor=(${cx},${cy}) L${cell.level}`);
-        return true;
-    }
     r.currentBuildingType = r.shoreTileIndex + slot - 1;  // CliffSet + slot - 1
     setFoundationCenter(r, packXY(i16(unpX(cell.mapCoords)), i16(unpYS(cell.mapCoords))));
     {
@@ -3369,7 +3345,7 @@ export function resolveCliffVariant(r: Rmg, tile: number): number {
     // F2I64(Random() * 2^-31 + 1.0) - the {1, 2} draw the slots that add 1.0
     // use (truncated only after the +1.0).
     const drawOneOrTwo = (): number =>
-        F2I64(r.rng.next() * 4.656612874161595e-10 + 1.0);
+        F2I64(r.rng.next() * 4.656612873077393e-10 + 1.0);
 
     switch (slot) {
         case 4: return r.shoreTileIndex + drawOneOrTwo() + 4;        // +5 / +6

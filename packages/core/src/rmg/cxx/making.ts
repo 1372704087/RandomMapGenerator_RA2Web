@@ -48,7 +48,6 @@ import {
     isWaterFamilyTile,
     isGreenGroundTile,
     buildWaterRing,
-    repairCliffPieces,
 } from './makingSub';
 
 // ---------------------------------------------------------------------------
@@ -158,8 +157,7 @@ export function makeRegions(r: Rmg): void {
         }
         placeCliffs(r);                              // 0x598d7b  sub_578E60
         correctCliffTiles(r);                        // 0x598d82  sub_5A17F0
-        repairCliffPieces(r);
-        violDiag(r, '4-after-cliffs');                        // port-only swallowed-piece repair
+        violDiag(r, '4-after-cliffs');
     }
 
     // ---- 0x598e1a: runs for every land type ------------------------------

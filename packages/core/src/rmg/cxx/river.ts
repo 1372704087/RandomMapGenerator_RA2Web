@@ -65,6 +65,38 @@ interface IsoFootprint {
 const maskBit = (mask: number, b: number): boolean =>
     Math.floor(mask / 2 ** b) % 2 === 1;
 
+// ---------------------------------------------------------------------------
+// TMP-derived footprint - the original's only source of truth.
+//
+// gamemd's 0x0057B440 reads the placement geometry straight off the TMP block:
+// `block.width` / `block.height` (CellsInX / CellsInY) and, per subtile, the
+// frame's own +0x28 height. vera20k mirrors that as `blocks.block(tile)` and
+// `block.subtiles[index].height`. The static k*Footprints tables below are
+// fallbacks for a tile whose TMP is not on disk; whenever the theater art is
+// loaded these tables are NOT consulted.
+// ---------------------------------------------------------------------------
+function tmpFootprint(r: Rmg, tile: number): IsoFootprint | null {
+    const frames = r.tileCellAttrs[tile];
+    if (frames === undefined || frames.length === 0)
+        return null;
+    const first = frames[0];
+    if (first === undefined || first.cellsInX <= 0 || first.cellsInY <= 0)
+        return null;
+
+    const w = first.cellsInX;
+    const h = first.cellsInY;
+    let mask = 0;
+    const z: number[] = [];
+    for (let i = 0; i < w * h && i < frames.length; ++i) {
+        const a = frames[i];
+        if (a === undefined || !a.hasFrame)
+            continue; // frame == null -> sub_tile None -> 0x0057B5D2 continue
+        mask += 2 ** i;
+        z.push(a.frameHeight);
+    }
+    return { w, h, mask, z };
+}
+
 // 42 entries, k = tile - r.shorePieces (shore01 .. shore42). Tiles 41 and 42
 // are the two irregular pieces; all the others are full rectangles. The whole
 // shore set has Z = 0 on every cell, so the Z arrays stay empty.
@@ -1945,6 +1977,13 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
     }
     if (fp === null)
         return false; // no image: 0x57b486
+
+    // 0x0057B440 takes width/height/subtile heights from the TMP block itself.
+    // The theater art is loaded by LoadTileCellAttrs, so this always wins over
+    // the static fallback table.
+    const tmpFp = tmpFootprint(r, tile);
+    if (tmpFp !== null)
+        fp = tmpFp;
     if (fp.h <= 0)
         return true; // 0x57b49c
 
@@ -1972,24 +2011,6 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
             // 3. Occupancy preamble (0x57b571 - 0x57b628).
             const wi = x + r.size.workSide * y;
             const wc = (flag !== 0) ? 0 : r.work.i(wi, 14);
-
-            // Port extension: record per-footprint-cell stamp/block outcomes
-            // for CliffSet pieces so repairCliffPieces can fix swallowed pieces.
-            const recordCliff = (okx: number): void => {
-                if (genCode === -1 && r.shoreTileIndex >= 0
-                    && tile >= r.shoreTileIndex && tile < r.shoreTileIndex + 40) {
-                    r.cliffStamps.push({
-                        ox: i16(cx),
-                        oy: i16(cy),
-                        x: i16(x),
-                        y: i16(y),
-                        slot: (tile - r.shoreTileIndex + 1) & 0xff,
-                        h: h & 0xff,
-                        z: (z << 24) >> 24,
-                        ok: okx & 0xff,
-                    });
-                }
-            };
 
             if (flag === 0 && wc > 0 && wc !== genCode && genCode !== -1) {
                 if (!r.isPlaceholderTile(cell)) {
@@ -2020,9 +2041,6 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
                     placed.v = false; // LABEL_58 / 0x57b77d
                     return false;
                 }
-                if (r.shoreTileIndex >= 0 && tile >= r.shoreTileIndex
-                    && tile < r.shoreTileIndex + 40)
-                    recordCliff(0);
                 continue; // LABEL_36: leave it be
             } else {
                 r.work.setI(wi, 14, genCode); // 0x57b6cc
@@ -2047,9 +2065,6 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
                 cell.isoTileTypeIndex = tile;
                 cell.height = subCell;
                 cell.level = level + z;
-                if (r.shoreTileIndex >= 0 && tile >= r.shoreTileIndex &&
-                    tile < r.shoreTileIndex + 40)
-                    recordCliff(1);
                 continue; // LABEL_36
             }
 
@@ -2062,9 +2077,6 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
                     isCliffFamilyCellBases(families, cell))) {
                 placed.v = false; // 0x57b77d
             }
-            if (r.shoreTileIndex >= 0 && tile >= r.shoreTileIndex
-                && tile < r.shoreTileIndex + 40)
-                recordCliff(0);
             return false; // 0x57b6aa
         }
     }
@@ -2074,124 +2086,15 @@ export function placeIsoTile(r: Rmg, lo: number, hi: number, level: number, genC
 }
 
 // ---------------------------------------------------------------------------
-// RepairCliffPieces - PORT-ONLY post pass (runs right after CorrectCliffTiles).
-// ---------------------------------------------------------------------------
-export function repairCliffPieces(r: Rmg): void {
-    if (r.shoreTileIndex < 0) {
-        r.cliffStamps.length = 0;
-        return;
-    }
-
-    const isCliffTile = (t: number): boolean =>
-        t >= r.shoreTileIndex && t < r.shoreTileIndex + 40;
-
-    // CorrectCliffTiles swaps pieces inside these slot clusters, so a
-    // surviving cell of a damaged piece may carry any cluster mate afterwards.
-    // Arguments are 0-BASED family indices (tile - shoreTileIndex, 0..39).
-    const clusterOf = (s: number): number => {
-        if (s >= 3 && s <= 5) return 1;
-        if (s >= 7 && s <= 9) return 2;
-        if (s >= 10 && s <= 12) return 3;
-        if (s >= 13 && s <= 15) return 4;
-        if (s >= 21 && s <= 23) return 5;
-        if (s >= 33 && s <= 35) return 6;
-        return 0;
-    };
-
-    const stillHoldsPiece = (c: MapCell | null, slot1: number): boolean => {
-        if (c === null || !isCliffTile(c.isoTileTypeIndex))
-            return false;
-        const idx = c.isoTileTypeIndex - r.shoreTileIndex;
-        // Slots 4-7 (1-based) end up as indices 3..6 (slot 7 never swaps);
-        // every other damaged piece only needs its own swap cluster to match.
-        if (slot1 >= 4 && slot1 <= 7)
-            return idx >= 3 && idx <= 6;
-        return clusterOf(idx) === clusterOf(slot1 - 1);
-    };
-
-    const writeTile = (x: number, y: number, tile: number, height: number): void => {
-        if (!r.cellExists(i16(x), i16(y)))
-            return;
-        const c = r.cellAt(i16(x), i16(y));
-        diag(`CLIFF-REPAIR (${x},${y}) t${c.isoTileTypeIndex}/h${c.height} -> t${tile}/h${height} L${c.level}`);
-        c.isoTileTypeIndex = tile;
-        c.height = height & 0xff;
-    };
-
-    const tWallCap = r.shoreTileIndex + 33;  // C34  1x1 inner corner, z4
-    const tVStrip = r.shoreTileIndex + 7;    // C8   1x2 vertical wall
-    const tFlatBase = r.shoreTileIndex + 11; // C12..C14 flat caps, z0
-
-    // ---- A. damaged multi-cell pieces (outcomes are contiguous per piece) ---
-    let i = 0;
-    while (i < r.cliffStamps.length) {
-        const first = r.cliffStamps[i]!;
-        let j = i;
-        let blockedMask = 0;
-        while (j < r.cliffStamps.length
-            && r.cliffStamps[j]!.ox === first.ox
-            && r.cliffStamps[j]!.oy === first.oy
-            && r.cliffStamps[j]!.slot === first.slot) {
-            if (r.cliffStamps[j]!.ok === 0)
-                blockedMask |= 1 << r.cliffStamps[j]!.h;
-            ++j;
-        }
-
-        if (blockedMask !== 0) {
-            const slot = first.slot;
-
-            // A1: 2x2 wall whose east column (h1/h3) is the only blocked part.
-            const eastColumnBlocked =
-                (blockedMask === ((1 << 1) | (1 << 3)));
-            let haveH0 = false, haveH2 = false;
-            for (let k = i; k < j; ++k) {
-                const o = r.cliffStamps[k]!;
-                if (o.ok === 0)
-                    continue;
-                if (o.h === 0) haveH0 = true;
-                if (o.h === 2) haveH2 = true;
-            }
-
-            if (slot >= 4 && slot <= 7 && eastColumnBlocked && haveH0 && haveH2) {
-                const top = r.cellAt(i16(first.ox), i16(first.oy));
-                const foot = r.cellAt(i16(first.ox), i16(first.oy + 1));
-                if (stillHoldsPiece(top, slot) && top.level >= 7
-                    && stillHoldsPiece(foot, slot) && foot.level <= 5) {
-                    writeTile(first.ox, first.oy, tVStrip, 0);
-                    writeTile(first.ox, first.oy + 1, tVStrip, 1);
-                }
-            } else {
-                // A2: take the surviving cells apart into 1x1 pieces.
-                for (let k = i; k < j; ++k) {
-                    const o = r.cliffStamps[k]!;
-                    if (o.ok === 0)
-                        continue;
-                    const c = r.cellAt(i16(o.x), i16(o.y));
-                    if (!stillHoldsPiece(c, slot))
-                        continue;
-                    if (o.z >= 4) {
-                        writeTile(o.x, o.y, tWallCap, 0);
-                    } else {
-                        const pick = (o.ox + o.oy + o.h) % 3;
-                        writeTile(o.x, o.y, tFlatBase + pick, 0);
-                    }
-                }
-            }
-        }
-
-        i = j;
-    }
-
-    r.cliffStamps.length = 0;
-}
-
-// ---------------------------------------------------------------------------
 // CliffCellsInX - Array.Items[tile]->CellsInX for a CliffSet tile.
 // ---------------------------------------------------------------------------
 export function cliffCellsInX(r: Rmg, tile: number): number {
     const slot = tile - r.shoreTileIndex;
     if (slot < 0 || slot >= 40)
         return 1;
+    const first = r.tileCellAttrs[tile]?.[0];
+    if (first !== undefined && first.cellsInX > 0)
+        return first.cellsInX;             // the TMP block's own CellsInX
     return kCliffFootprints[slot]!.w;
 }
 
@@ -2287,116 +2190,6 @@ export function isCliffWallRiding(r: Rmg, wx: number, wy: number, wallLevel: num
     }
     diag(`RIDING (${wx},${wy}) L${wallLevel} faceDir=${bestDir} low=${lowRamp ? 1 : 0} top=${topRamp ? 1 : 0}`);
     return lowRamp && !topRamp;
-}
-
-export function cliffPieceHitsRamp(r: Rmg, anchor: MapCell | null, slot: number): boolean {
-    if (anchor === null || slot < 1 || slot > 40)
-        return false;
-
-    const fp = kCliffFootprints[slot - 1]!;
-    const ax = i16(anchor.mapCoords & 0xffff);
-    const ay = i16(anchor.mapCoords >>> 16);
-    const baseLevel = anchor.level;
-
-    let zIndex = 0;
-    for (let row = 0; row < fp.h; ++row) {
-        for (let col = 0; col < fp.w; ++col) {
-            if (!maskBit(fp.mask, row * fp.w + col))
-                continue;
-            const z = fp.z[zIndex] ?? 0;
-            ++zIndex;
-            const x = ax + col;
-            const y = ay + row;
-            if (!r.cellExists(i16(x), i16(y)))
-                continue;
-            const c = r.cellAt(i16(x), i16(y));
-            if (z >= 4) {
-                // Wall cell: riding the ramp facade is the original conflict.
-                if (isCliffWallRiding(r, x, y, baseLevel + z))
-                    return true;
-            } else {
-                // Foot cell: if it lands on ramp art the wall has no base and
-                // floats over the ramp body.
-                if (isRampArtCell(r, c))
-                    return true;
-            }
-        }
-    }
-    return false;
-}
-
-// Re-stamp the footprint cells of a rejected piece as smaller CliffSet art.
-// Only placeholder cells are written, so ramp / plateau art is never touched.
-export function trimCliffPieceForRamp(r: Rmg, anchor: MapCell, slot: number): number {
-    const fp = kCliffFootprints[slot - 1]!;
-    const ax = i16(anchor.mapCoords & 0xffff);
-    const ay = i16(anchor.mapCoords >>> 16);
-    const baseLevel = anchor.level;
-
-    interface CellRef { x: number; y: number; h: number; level: number; }
-    const walls: CellRef[] = [];
-    const feet: CellRef[] = [];
-    let zIndex = 0;
-    for (let row = 0; row < fp.h; ++row) {
-        for (let col = 0; col < fp.w; ++col) {
-            if (!maskBit(fp.mask, row * fp.w + col))
-                continue;
-            const z = fp.z[zIndex] ?? 0;
-            ++zIndex;
-            const x = ax + col;
-            const y = ay + row;
-            if (!r.cellExists(i16(x), i16(y)))
-                continue;
-            const c = r.cellAt(i16(x), i16(y));
-            if (!r.isPlaceholderTile(c))
-                continue; // ramp / art: keep it
-            const newLevel = baseLevel + z;
-            if (z >= 4 && isCliffWallRiding(r, x, y, newLevel))
-                continue; // the rejected side
-            const ref: CellRef = { x, y, h: row * fp.w + col, level: newLevel };
-            if (z >= 4) walls.push(ref);
-            else feet.push(ref);
-        }
-    }
-
-    let written = 0;
-    // Nothing has been stamped yet, so like placeIsoTile the wall cells must
-    // also be RAISED to their piece level (anchor L4 + z4 = L8); feet keep
-    // the anchor level.
-    const write = (x: number, y: number, tile: number, height: number, level: number): void => {
-        const c = r.cellAt(i16(x), i16(y));
-        if (!r.isPlaceholderTile(c))
-            return;
-        diag(`CLIFF-TRIM slot=${slot} (${x},${y}) -> t${tile}/h${height} L${level}`);
-        c.isoTileTypeIndex = tile;
-        c.height = height & 0xff;
-        c.level = level;
-        ++written;
-    };
-
-    const tVStrip = r.shoreTileIndex + 7;   // C8
-    const tWallCap = r.shoreTileIndex + 33; // C34
-    const tFlatBase = r.shoreTileIndex + 11; // C12..C14
-
-    // C8: surviving west column h0 (wall z4) + h2 (foot z0) of a 2x2 wall.
-    if (slot >= 4 && slot <= 7 && baseLevel + 4 >= 7 && baseLevel <= 5) {
-        const has = (hh: number): boolean => {
-            for (const w of walls) if (w.h === hh) return true;
-            for (const f of feet) if (f.h === hh) return true;
-            return false;
-        };
-        if (has(0) && has(2)) {
-            write(ax, ay, tVStrip, 0, baseLevel + 4);
-            write(ax, ay + 1, tVStrip, 1, baseLevel);
-            return written;
-        }
-    }
-
-    for (const w of walls)
-        write(w.x, w.y, tWallCap, 0, w.level);
-    for (const f of feet)
-        write(f.x, f.y, tFlatBase + (ax + ay + f.h) % 3, 0, f.level);
-    return written;
 }
 
 // ---------------------------------------------------------------------------
@@ -2616,9 +2409,12 @@ export function placeWaterDetailTile(r: Rmg, tileIndex: number, packedCoords: nu
         fp = kSlopeSetPieceFootprints[tileIndex - r.slopeSetPiecesIndex]!;
     else
         fp = findFamilyFootprint(r, tileIndex);
-    if (fp === null)
+    if (fp === null) {
+        if (process.env.RMG_DEBUG_STAMP)
+            diag(`WD-REJECT tile=${tileIndex} at=(${unpX(packedCoords)},${unpYS(packedCoords)}) fp=null`);
         return; // no image: 0x5a6c32
-
+    }
+    let wdWritten = 0;
     const anchorX = unpX(packedCoords);
     const anchorY = unpYS(packedCoords);
     let zIndex = 0; // occupied-cell counter
@@ -2657,6 +2453,9 @@ export function placeWaterDetailTile(r: Rmg, tileIndex: number, packedCoords: nu
                 cell.level = level + z - 4;    // + frame[+0x28]
             cell.slopeIndex = subSlope;        // frame[+0x2A]
             r.work.setI(r.workIndex(x, y), 14, genCode); // 0x5a6d3a
+            if (process.env.RMG_DEBUG_STAMP)
+                diag(`WD tile=${tileIndex} cell=(${x},${y}) lvl=${cell.level}`
+                    + ` slope=${cell.slopeIndex} sub=${subIndex} base=${r.slopeSetPiecesIndex}`);
         }
     }
 }

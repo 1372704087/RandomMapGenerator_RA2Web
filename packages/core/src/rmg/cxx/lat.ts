@@ -52,7 +52,7 @@ import {
 // recalc: SetupLAT (sub_47CA80) and RecalcAttributes (sub_47D2B0) are shared
 // pipeline stages - recalc imports nothing at runtime, so lat -> recalc is
 // acyclic (reported deviation from the strict "river only" note).
-import { setupLAT, recalcAttributes } from './recalc';
+import { setupLATWhenEnabled, recalcAttributes } from './recalc';
 
 // ---------------------------------------------------------------------------
 // Constants.
@@ -333,7 +333,7 @@ export function scatterLATBlobs(r: Rmg): void {
         const it = new CellIterator();
         it.reset(r.cellSlots, r.size.mapWidth);
         for (let cell = it.next(); cell !== null; cell = it.next())
-            setupLAT(r, cell);
+            setupLATWhenEnabled(r, cell);
     }
 
     // ---- 5. the green patch loop ------------------------------------------
@@ -571,7 +571,7 @@ export function scatterRocks(r: Rmg): void {
         const it = new CellIterator();
         it.reset(r.cellSlots, r.size.mapWidth);
         for (let cell = it.next(); cell !== null; cell = it.next())
-            setupLAT(r, cell);
+            setupLATWhenEnabled(r, cell);
     }
 
     // ---- 4. the same green patch loop -------------------------------------
