@@ -26,8 +26,17 @@ export class AbstractMapMember {
   public SEConnected: boolean = false;
   /** 对应 C# bool SWConnected = false（西南方向已连接） */
   public SWConnected: boolean = false;
-  /** 对应 C# int Entropy = 50（熵值，用于调度随机性） */
+  /** 对应 C# int Entropy = 50（熵值，用于调度随机性；UpdateMapUnitInfo 写入真熵=实际候选数） */
   public Entropy: number = 50;
+  /**
+   * 延迟放置标记（2026-11-18，非 C# 原有）。
+   *
+   * SetMapUnitByEntropy 发现某格在当前邻居约束下候选数为 0 时置位：
+   * 约束只会随放置增加而收紧，除非某个邻居被回溯删除，该格不可能有解，
+   * 继续在它身上回溯只会把好局拆光。跳过它继续放其余格子；
+   * DeleteMapUnit 删除格子时解除四邻的此标记（约束可能已放松）。
+   */
+  public Deferred: boolean = false;
   /** 对应 C# bool IsAllOnVisibleMap = false */
   public IsAllOnVisibleMap: boolean = false;
   /** 对应 C# bool PlayerLocationHasTiberium = false */

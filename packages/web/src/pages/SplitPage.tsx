@@ -2,19 +2,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchTheaters,
   splitMap,
+  splitSpawnUnits,
   detectSplitTheater,
   fetchMapPreviews,
   fetchCncmapsPreview,
   downloadText,
+  downloadBlob,
   type MapPreviewData,
   type MapSplitSlice,
   type SplitResult,
+  type SplitSpawnResult,
   type TheaterDetection,
   type TheaterInfo,
 } from '../api';
 import MapPreviewCanvas from '../components/MapPreviewCanvas';
 import PreviewLightbox from '../components/PreviewLightbox';
 import ImageLightbox from '../components/ImageLightbox';
+import { createZip } from '../zip';
 
 // ============== 类型 ==============
 
@@ -27,6 +31,7 @@ type Status =
 const THEATER_LABELS: Record<string, string> = {
   DESERT: '沙漠 DESERT',
   NEWURBAN: '新城市 NEWURBAN',
+  SNOW: '雪地 SNOW',
   TEMPERATE: '温带 TEMPERATE',
   TEMPERATE_Islands: '温带岛屿 TEMPERATE_Islands'
 };
@@ -70,6 +75,10 @@ export default function SplitPage() {
   const [frame, setFrame] = useState(true);
 
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
+  /** 只切出生点（独立于普通切片） */
+  const [spawnStatus, setSpawnStatus] = useState<Status>({ kind: 'idle' });
+  const [spawnResult, setSpawnResult] = useState<SplitSpawnResult | null>(null);
+  const [spawnPreviews, setSpawnPreviews] = useState<Record<string, MapPreviewData>>({});
   const [result, setResult] = useState<SplitResult | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -200,6 +209,9 @@ export default function SplitPage() {
       setMapContent(text);
       setSourceName(file.name);
       setStatus({ kind: 'idle' });
+      setSpawnStatus({ kind: 'idle' });
+      setSpawnResult(null);
+      setSpawnPreviews({});
     } catch (err) {
       setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
     }
@@ -278,6 +290,9 @@ export default function SplitPage() {
     setSlicePreviews({});
     clearSliceRender();
     setStatus({ kind: 'idle' });
+    setSpawnStatus({ kind: 'idle' });
+    setSpawnResult(null);
+    setSpawnPreviews({});
     if (fileRef.current) fileRef.current.value = '';
   }
 
@@ -336,17 +351,83 @@ export default function SplitPage() {
     }
   }
 
+  /** 只切出生点：以每个 Waypoint 为中心切单元，结果在下方布局里展示 */
+  async function handleSpawnCut() {
+    setSpawnResult(null);
+    setSpawnPreviews({});
+    if (mapContent.trim().length === 0) {
+      setSpawnStatus({ kind: 'error', message: '请粘贴或上传一张完整地图的文本内容' });
+      return;
+    }
+    if (autoTheater && !autoUsable) {
+      setSpawnStatus({
+        kind: 'error',
+        message: detection?.engineTheater
+          ? `地图的 Theater=${detection.engineTheater} 在本仓库没有对应地形目录，请关闭自动识别并手动指定`
+          : '没能从地图内容识别出地图类型，请确认内容完整，或关闭自动识别并手动指定',
+      });
+      return;
+    }
+    if (!autoTheater && !theaterType) {
+      setSpawnStatus({ kind: 'error', message: '请选择地图类型（theater）' });
+      return;
+    }
+
+    setSpawnStatus({ kind: 'loading' });
+    try {
+      const res = await splitSpawnUnits({
+        mapContent,
+        autoTheater,
+        theaterType: autoTheater ? undefined : theaterType,
+      });
+      setSpawnResult(res);
+      if (res.spawns.length === 0) {
+        setSpawnStatus({
+          kind: 'success',
+          message: '源图里没有有效出生点（[Waypoints] 为空或全是 0,0）',
+        });
+        return;
+      }
+      // 缩略图只画功能窗口，保留空洞透明；完整窗口便于把出生点标在图片中心
+      fetchMapPreviews(res.spawns.map((s) => s.content), {
+        transparentEmpty: true,
+        mapUnitWindow: true,
+      })
+        .then((items) => {
+          const map: Record<string, MapPreviewData> = {};
+          res.spawns.forEach((s, i) => { if (items[i]) map[s.name] = items[i]; });
+          setSpawnPreviews(map);
+        })
+        .catch(() => setSpawnPreviews({}));
+      setSpawnStatus({
+        kind: 'success',
+        message: `已按出生点中心切出 ${res.count} 个出生点切片（${res.unitSize}），可在下方查看和下载`,
+      });
+    } catch (err) {
+      setSpawnStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  function downloadSpawnAll() {
+    if (!spawnResult || spawnResult.spawns.length === 0) return;
+    const zip = createZip(
+      spawnResult.spawns.map((s) => ({ name: `${s.name}.map`, content: s.content })),
+    );
+    const base = sourceName ? sourceName.replace(/\.[^.]+$/, '') : spawnResult.theaterDir;
+    downloadBlob(`${base}_spawns.zip`, zip);
+  }
+
   function downloadSlice(slice: MapSplitSlice) {
     downloadText(`${slice.name}.map`, slice.content, 'text/plain');
   }
 
-  async function downloadAll() {
+  function downloadAll() {
     if (!result) return;
-    for (const s of result.slices) {
-      downloadSlice(s);
-      // 浏览器对连续下载有节流，逐张错开
-      await new Promise((r) => setTimeout(r, 120));
-    }
+    const zip = createZip(
+      result.slices.map((s) => ({ name: `${s.name}.map`, content: s.content })),
+    );
+    const base = sourceName ? sourceName.replace(/\.[^.]+$/, '') : result.theaterDir;
+    downloadBlob(`${base}_slices.zip`, zip);
   }
 
   function downloadManifest() {
@@ -528,6 +609,9 @@ export default function SplitPage() {
             onChange={(e) => {
               setMapContent(e.target.value);
               if (sourceName) setSourceName('');
+              setSpawnStatus({ kind: 'idle' });
+              setSpawnResult(null);
+              setSpawnPreviews({});
             }}
           />
           <span className="field-hint">
@@ -554,10 +638,21 @@ export default function SplitPage() {
           <button type="submit" className="btn-generate" disabled={status.kind === 'loading'}>
             {status.kind === 'loading' ? '拆解中...' : '拆解为切片'}
           </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleSpawnCut}
+            disabled={spawnStatus.kind === 'loading'}
+          >
+            {spawnStatus.kind === 'loading' ? '切出生点...' : '只切出生点'}
+          </button>
           <button type="button" className="btn-secondary" onClick={clearAll}>
             清空
           </button>
         </div>
+        <span className="field-hint">
+          只切出生点：以每个出生点为中心切一个单元，每个文件只带一个起点，只导出 spawn，不影响普通切片。
+        </span>
 
         {status.kind === 'loading' && (
           <div className="status status-loading">
@@ -567,6 +662,19 @@ export default function SplitPage() {
         )}
         {status.kind === 'success' && <div className="status status-success">{status.message}</div>}
         {status.kind === 'error' && <div className="status status-error">{status.message}</div>}
+
+        {spawnStatus.kind === 'loading' && (
+          <div className="status status-loading">
+            <span className="spinner" />
+            正在按出生点中心切分...
+          </div>
+        )}
+        {spawnStatus.kind === 'success' && (
+          <div className="status status-success">{spawnStatus.message}</div>
+        )}
+        {spawnStatus.kind === 'error' && (
+          <div className="status status-error">{spawnStatus.message}</div>
+        )}
       </section>
 
       {/* ========== 结果区 ========== */}
@@ -618,6 +726,9 @@ export default function SplitPage() {
                         }
                       >
                         <span className="slice-cell-name">{slice.name}</span>
+                        {isPartialSliceContent(slice.content) && (
+                          <span className="slice-partial-badge">空洞</span>
+                        )}
                         {slicePreviews[slice.name] && (
                           <MapPreviewCanvas
                             preview={slicePreviews[slice.name]}
@@ -634,12 +745,15 @@ export default function SplitPage() {
 
               <div className="field field-inline" style={{ marginTop: 12 }}>
               <button type="button" className="btn-secondary" onClick={downloadAll}>
-                下载全部切片（{result.count}）
+                下载全部切片（ZIP，{result.count} 张）
               </button>
               <button type="button" className="btn-secondary" onClick={downloadManifest}>
                 下载 manifest.json
               </button>
               </div>
+              <span className="field-hint">
+                放进 MapUnits 时只使用「完整」切片；带「空洞」标记的切片仅供查看。
+              </span>
             </>
           )}
 
@@ -723,6 +837,75 @@ export default function SplitPage() {
               )}
             </>
           )}
+        </section>
+      )}
+
+      {/* ========== 出生点切片结果 ========== */}
+      {spawnResult && spawnResult.spawns.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">出生点切片</h2>
+
+          {spawnResult.warnings.length > 0 && (
+            <div className="notice notice-warn" style={{ marginBottom: 12 }}>
+              {spawnResult.warnings.map((w) => <div key={w}>{w}</div>)}
+            </div>
+          )}
+
+          <div className="kv-grid">
+            <div className="kv"><span className="kv-k">Theater</span><span className="kv-v">{spawnResult.theater}</span></div>
+            <div className="kv"><span className="kv-k">单元尺寸</span><span className="kv-v">{spawnResult.unitSize}</span></div>
+            <div className="kv"><span className="kv-k">出生点切片</span><span className="kv-v">{spawnResult.count} 张</span></div>
+          </div>
+
+          <h3 className="sub-title">切片布局（每个单元一个出生点，位于窗口中心）</h3>
+          <div className="spawn-grid">
+            {spawnResult.spawns.map((s) => {
+              const preview = spawnPreviews[s.name];
+              return (
+                <button
+                  type="button"
+                  key={s.name}
+                  className="spawn-card"
+                  onClick={() => {
+                    if (preview) {
+                      setLightbox({
+                        preview,
+                        title: `${s.name}.map · 源坐标 (${s.x},${s.y}) · 出生点在窗口中心`,
+                      });
+                    }
+                  }}
+                  title={`查看 ${s.name}（出生点位于窗口中心）`}
+                >
+                  {preview ? (
+                    <span className="spawn-thumb-wrap">
+                      <MapPreviewCanvas
+                        preview={preview}
+                        maxWidth={110}
+                        upscale
+                        className="slice-thumb transparent-preview"
+                      />
+                      <span className="spawn-crosshair" title="出生点" />
+                    </span>
+                  ) : (
+                    <span className="spawn-thumb-placeholder">预览中…</span>
+                  )}
+                  <span className="spawn-card-name">{s.name}</span>
+                  <span className="spawn-card-meta">
+                    源坐标 ({s.x},{s.y}){s.partial ? ' · 空洞' : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="field field-inline" style={{ marginTop: 12 }}>
+            <button type="button" className="btn-secondary" onClick={downloadSpawnAll}>
+              下载全部切片（ZIP，{spawnResult.count} 张）
+            </button>
+          </div>
+          <span className="field-hint">
+            每个文件只带一个出生点；出生点位于单元窗口中心，直接放进 MapUnits 即可。
+          </span>
         </section>
       )}
       {lightbox && (

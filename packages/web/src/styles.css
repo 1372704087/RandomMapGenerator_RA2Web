@@ -685,6 +685,85 @@ html, body {
   opacity: 0.7;
 }
 
+.slice-partial-badge {
+  padding: 0 4px;
+  border: 1px solid var(--border-dim);
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.spawn-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.spawn-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg-panel, transparent);
+  border: 1px solid var(--border-dim);
+  border-radius: 3px;
+  color: var(--text);
+  cursor: zoom-in;
+}
+
+.spawn-card:hover {
+  border-color: var(--gold);
+}
+
+.spawn-thumb-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.spawn-crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65), 0 0 6px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.spawn-crosshair::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  background: var(--gold);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.spawn-thumb-placeholder {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.spawn-card-name {
+  font-size: 12px;
+  font-weight: 700;
+  word-break: break-all;
+}
+
+.spawn-card-meta {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
 /* ============================================================
    提示块 / 列表
    ============================================================ */

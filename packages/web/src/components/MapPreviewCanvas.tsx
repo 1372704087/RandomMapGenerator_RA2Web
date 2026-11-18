@@ -14,6 +14,7 @@ export default function MapPreviewCanvas({
   className,
   title,
   onClick,
+  upscale = false,
 }: {
   preview: MapPreviewData | null;
   maxWidth?: number;
@@ -22,6 +23,8 @@ export default function MapPreviewCanvas({
   title?: string;
   /** 点击回调（如打开大图查看器） */
   onClick?: () => void;
+  /** 允许放大到 maxWidth（默认只缩不放） */
+  upscale?: boolean;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -30,7 +33,7 @@ export default function MapPreviewCanvas({
   }, [preview]);
 
   if (!preview) return null;
-  const scale = Math.min(1, maxWidth / preview.width);
+  const scale = upscale ? maxWidth / preview.width : Math.min(1, maxWidth / preview.width);
 
   return (
     <canvas

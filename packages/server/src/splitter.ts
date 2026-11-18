@@ -11,7 +11,9 @@
 
 import {
   splitMap,
+  splitSpawnUnits,
   MapSplitSlice,
+  MapSpawnUnit,
   MapSplitOptions,
   MapSplitConfig,
   MapFile,
@@ -58,7 +60,52 @@ export function buildSplitConfig(theater: TheaterResources): MapSplitConfig {
     theater: theaterFromName(theater.theaterEnum),
     indicatorNum,
     emptyMapContent: theater.emptyMapContent,
+    // 手工单元「接收剖面」表：切片缝语义类对齐到手工连接类型用。
+    // 每个手工单元给出其连接类型与首列（NW 角色）/首行（NE 角色）的逐格 z；
+    // -1 = 单元文件缺格，对齐时视为通配。对齐判定在 core/mapSplitter 里做
+    // （按类型共识需求，冲突类型放弃对齐，保证高度连续）。
+    handmadeRecvProfiles: buildHandmadeRecvProfiles(
+      theater.cachedAbstractMapUnitList,
+    ),
   };
+}
+
+/**
+ * 从缓存的 AbstractMapUnit 列表提取手工单元「接收剖面」表。
+ *
+ * NW 角色 recv 剖面 = 单元首列（x=0）各行 z；NE 角色 = 单元首行（y=0）各列 z。
+ * empty.map 不参与（它永远不是拼接候选）。
+ */
+function buildHandmadeRecvProfiles(
+  units: Iterable<{
+    MapUnitName: string;
+    Width: number;
+    Height: number;
+    NWConnectionType: number;
+    NEConnectionType: number;
+    AbsTileType: ({ Z: number } | null)[][];
+  }>,
+): { nw: { type: number; zs: number[] }[]; ne: { type: number; zs: number[] }[] } {
+  const nw: { type: number; zs: number[] }[] = [];
+  const ne: { type: number; zs: number[] }[] = [];
+  for (const u of units) {
+    if (u.MapUnitName === 'empty') continue;
+    if (u.NWConnectionType >= 0) {
+      const zs: number[] = [];
+      for (let j = 0; j < u.Height; j++) {
+        zs.push(u.AbsTileType[0]?.[j]?.Z ?? -1);
+      }
+      nw.push({ type: u.NWConnectionType, zs });
+    }
+    if (u.NEConnectionType >= 0) {
+      const zs: number[] = [];
+      for (let i = 0; i < u.Width; i++) {
+        zs.push(u.AbsTileType[i]?.[0]?.Z ?? -1);
+      }
+      ne.push({ type: u.NEConnectionType, zs });
+    }
+  }
+  return { nw, ne };
 }
 
 /**
@@ -85,6 +132,28 @@ export function splitFullMap(
 
   const config = buildSplitConfig(theater);
   return splitMap(sourceIni, config, options);
+}
+
+/**
+ * 以源图出生点为中心切出独立 spawn 单元（每个文件只带一个出生点）。
+ *
+ * @param theaterName theater 目录名
+ * @param sourceIni   完整地图 INI 文本
+ */
+export function splitSpawnUnitsForTheater(
+  theaterName: string,
+  sourceIni: string,
+): MapSpawnUnit[] {
+  if (!sourceIni || sourceIni.trim().length === 0) {
+    throw new Error('sourceIni must be a non-empty map content string.');
+  }
+
+  const theater = getTheaterResources(theaterName);
+  if (!theater) {
+    throw new Error(`Theater "${theaterName}" not found.`);
+  }
+
+  return splitSpawnUnits(sourceIni, buildSplitConfig(theater));
 }
 
 // ---------------------------------------------------------------------------

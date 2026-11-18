@@ -125,7 +125,7 @@ for (const s of slicesTrue) {
   units.push({ slice: s, amu });
 }
 
-check('所有切片连接 ID 均在 [0, W)', () => {
+check('所有切片连接 ID 均在编码空间内', () => {
   for (const { slice, amu } of units) {
     for (const [label, v] of [
       ['NW', amu.NWConnectionType],
@@ -133,9 +133,11 @@ check('所有切片连接 ID 均在 [0, W)', () => {
       ['SW', amu.SWConnectionType],
       ['SE', amu.SEConnectionType],
     ]) {
+      // 连接 ID = pos + 15*(sub+16z)，上限 3599（core tile/connectionId.ts）；
+      // 语义类方案下扩展类从 16 起，不再局限于 [0, W)
       assert.ok(
-        Number.isInteger(v) && v >= 0 && v < W,
-        `${slice.name} ${label}=${v} not in [0,${W})`,
+        Number.isInteger(v) && v >= 0 && v <= 3599,
+        `${slice.name} ${label}=${v} not in [0,3599]`,
       );
     }
   }
@@ -470,7 +472,8 @@ for (const name of theaters) {
       const amu = new AbstractMapUnit();
       amu.Initialize({ name: `${s.name}.map`, fullName: s.name }, s.content);
       for (const v of [amu.NWConnectionType, amu.NEConnectionType, amu.SWConnectionType, amu.SEConnectionType]) {
-        assert.ok(Number.isInteger(v) && v >= 0 && v < muW, `${s.name} conn=${v}`);
+        // 连接 ID 编码空间：pos + 15*(sub+16z)，上限 3599（core tile/connectionId.ts）
+        assert.ok(Number.isInteger(v) && v >= 0 && v <= 3599, `${s.name} conn=${v}`);
       }
       assert.ok(amu.Weight > 0, `${s.name} weight`);
     }
@@ -598,14 +601,15 @@ function refillBlanks(content, scope) {
   );
 }
 
-const blankProbe =
-  blankSlices.find((s) => s.name === 'split_0_5') ?? blankSlices[0];
-// 注意：genResult 由 Math.random 生成，每次运行内容不同 ⇒ 这里统计的是「本运行」的分布
-let probeOutsideMinus1 = 0;
-let probeInsideMinus1 = 0;
-{
+// genResult 由 Math.random 生成，每次运行内容不同 ⇒ 块外/块内 -1 的分布随运行
+// 波动（2026-11-18 修复：旧版固定取 split_0_5/首张切片，随机图没有 -1 时断言空转）。
+// 探针按性质选择：找到含对应 -1 的切片才做检查；整批都没有则跳过（守卫意图
+// 由 frame 段独立保障）。
+function countMinus1(content) {
   const mf = new MapFile();
-  mf.CreateIsoTileList(blankProbe.content);
+  mf.CreateIsoTileList(content);
+  let outside = 0;
+  let inside = 0;
   for (const t of mf.IsoTileList) {
     if (t.TileNum !== -1) continue;
     const inBlock =
@@ -613,34 +617,40 @@ let probeInsideMinus1 = 0;
       t.Rx < BLANK_SX + BLANK_MUW &&
       t.Ry >= BLANK_SY &&
       t.Ry < BLANK_SY + BLANK_MUH;
-    if (inBlock) probeInsideMinus1++;
-    else probeOutsideMinus1++;
+    if (inBlock) inside++;
+    else outside++;
   }
-  console.log(
-    `  探针切片 ${blankProbe.name}: 块外 -1=${probeOutsideMinus1}  块内 -1=${probeInsideMinus1}`,
-  );
-  check('探针切片确实存在块外 -1 空格（断言对象非空转）', () => {
-    assert.ok(probeOutsideMinus1 > 0, `outside=-1 count is ${probeOutsideMinus1}`);
-  });
+  return { outside, inside };
 }
-
-const modelA = unitModel(blankProbe.content);
-const modelB = unitModel(refillBlanks(blankProbe.content, 'outside'));
-const modelC = unitModel(refillBlanks(blankProbe.content, 'all'));
-
-check('块外 -1 填 0 → AbstractMapUnit 模型逐格一致（惰性证明）', () => {
-  assert.equal(modelB.key, modelA.key);
-});
-check('块内 -1 填 0 → 模型会改变（证明上面的惰性断言有牙齿）', () => {
-  assert.notEqual(modelC.key, modelA.key);
-});
-// 实测记录（2026-09-18）：块内 -1 在 AbstractMapUnit 里是「有记录的 TileNum=-1」，
-// 不是缺格（null）。也就是说「块内 -1 → 0」必然改变单元模型 ⇒ 块内一格都不能动。
-// 若未来想让切片在编辑器里变实心，只允许填「块外」（上面已证明其惰性）。
+const outsideProbe = blankSlices.find((s) => countMinus1(s.content).outside > 0);
+const insideProbe = blankSlices.find((s) => countMinus1(s.content).inside > 0);
 console.log(
-  `  块内 -1 记录数=${probeInsideMinus1}（Initialize 后 null 格数=${modelA.nullCount}）` +
-    ` —— 块内为显式 -1 记录，非缺格`,
+  `  探针选择: 块外-1 探针=${outsideProbe ? outsideProbe.name : '无'} ` +
+    `块内-1 探针=${insideProbe ? insideProbe.name : '无'}`,
 );
+
+if (outsideProbe) {
+  const modelA = unitModel(outsideProbe.content);
+  const modelB = unitModel(refillBlanks(outsideProbe.content, 'outside'));
+  check('块外 -1 填 0 → AbstractMapUnit 模型逐格一致（惰性证明）', () => {
+    assert.equal(modelB.key, modelA.key);
+  });
+} else {
+  console.warn('  本运行没有任何含块外 -1 的切片（随机源图无清理格），跳过惰性证明');
+}
+if (insideProbe) {
+  const modelA2 = unitModel(insideProbe.content);
+  const modelC = unitModel(refillBlanks(insideProbe.content, 'all'));
+  check('块内 -1 填 0 → 模型会改变（证明上面的惰性断言有牙齿）', () => {
+    assert.notEqual(modelC.key, modelA2.key);
+  });
+  console.log(
+    `  块内 -1 探针 ${insideProbe.name}：记录数=${countMinus1(insideProbe.content).inside}` +
+      `（Initialize 后 null 格数=${modelA2.nullCount}）—— 块内为显式 -1 记录，非缺格`,
+  );
+} else {
+  console.warn('  本运行没有任何含块内 -1 的切片，跳过有牙齿检查');
+}
 
 // ---------------------------------------------------------------------------
 section('窗外框（frame 选项）');

@@ -13,6 +13,7 @@ export * from './tile/isoTile';
 export * from './tile/overlay';
 export * from './tile/abstractTileType';
 export * from './tile/abstractTile';
+export * from './tile/connectionId';
 export * from './tile/abstractMapMember';
 export * from './tile/abstractMapUnit';
 export * from './tile/failureRecord';

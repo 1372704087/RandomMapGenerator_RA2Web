@@ -4,6 +4,7 @@ import { WorkingMap } from '../workingMap';
 import { MapFile } from '../fileio';
 import type { FileInfoLike } from '../fileio';
 import { IniFile } from '../io/iniFile';
+import { decodeConnectionId } from './connectionId';
 import { Unit } from '../objects/unit';
 import { Infantry } from '../objects/infantry';
 import { Structure } from '../objects/structure';
@@ -138,7 +139,8 @@ export class AbstractMapUnit {
       }
     }
 
-    // 检测四向连接类型（依据指示图块 IndicatorNum）
+    // 检测四向连接类型（依据指示图块 IndicatorNum；ID 编码见 tile/connectionId.ts：
+    // 位置 pos + SubTile/Z 高位。手工单元指示块 SubTile=Z=0 → 类型即位置，兼容旧格式）
     for (let i = 0; i < this.Width; i++) {
       for (const tile of map.IsoTileList) {
         if (
@@ -146,28 +148,28 @@ export class AbstractMapUnit {
           tile.Ry === i + WorkingMap.StartingY &&
           tile.TileNum === WorkingMap.IndicatorNum
         ) {
-          this.NWConnectionType = i;
+          this.NWConnectionType = decodeConnectionId(i, tile.SubTile, tile.Z);
         }
         if (
           tile.Rx === WorkingMap.StartingX + this.Width + 2 &&
           tile.Ry === i + WorkingMap.StartingY &&
           tile.TileNum === WorkingMap.IndicatorNum
         ) {
-          this.SEConnectionType = i;
+          this.SEConnectionType = decodeConnectionId(i, tile.SubTile, tile.Z);
         }
         if (
           tile.Ry === WorkingMap.StartingX - 3 &&
           tile.Rx === i + WorkingMap.StartingY &&
           tile.TileNum === WorkingMap.IndicatorNum
         ) {
-          this.NEConnectionType = i;
+          this.NEConnectionType = decodeConnectionId(i, tile.SubTile, tile.Z);
         }
         if (
           tile.Ry === WorkingMap.StartingX + this.Width + 2 &&
           tile.Rx === i + WorkingMap.StartingY &&
           tile.TileNum === WorkingMap.IndicatorNum
         ) {
-          this.SWConnectionType = i;
+          this.SWConnectionType = decodeConnectionId(i, tile.SubTile, tile.Z);
         }
       }
     }

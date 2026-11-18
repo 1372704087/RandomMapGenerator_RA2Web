@@ -99,14 +99,11 @@ export function renderMapPreview(
   let mapUnitWindow: [number, number, number, number] | null = null;
   if (options?.mapUnitWindow) {
     const basic = mapIni.GetSection('Basic');
-    const partial = (basic?.GetStringValue('PartialMapUnit', '') ?? '').toLowerCase() === 'yes';
-    if (partial) {
-      const sx = Number.parseInt(basic!.GetStringValue('MapUnitStartX', '0'), 10);
-      const sy = Number.parseInt(basic!.GetStringValue('MapUnitStartY', '0'), 10);
-      const w = Number.parseInt(basic!.GetStringValue('MapUnitWidth', '0'), 10);
-      const h = Number.parseInt(basic!.GetStringValue('MapUnitHeight', '0'), 10);
-      if (w > 0 && h > 0) mapUnitWindow = [sx, sy, w, h];
-    }
+    const sx = Number.parseInt(basic?.GetStringValue('MapUnitStartX', '0') ?? '0', 10);
+    const sy = Number.parseInt(basic?.GetStringValue('MapUnitStartY', '0') ?? '0', 10);
+    const w = Number.parseInt(basic?.GetStringValue('MapUnitWidth', '0') ?? '0', 10);
+    const h = Number.parseInt(basic?.GetStringValue('MapUnitHeight', '0') ?? '0', 10);
+    if (w > 0 && h > 0) mapUnitWindow = [sx, sy, w, h];
   }
   const terrainAt = new Map<string, string>();
   const terrainSec = mapIni.GetSection('Terrain');

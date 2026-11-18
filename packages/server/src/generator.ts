@@ -102,7 +102,7 @@ export async function generateMap(
  *   2.  WorkingMap.Initialize(width, height, config)
  *   3.  恢复缓存的 SterilizeMapUnit 结果
  *   4.  WorkingMap.PlacePlayerLocation(count, direction) - 每个方向
- *   5.  WorkingMap.SetMapUnitByOrder()
+ *   5.  WorkingMap.SetMapUnitByEntropy()（真熵=实际候选数,最约束优先）
  *   6.  WorkingMap.FillRemainingEmptyUnitMap()
  *   7.  WorkingMap.PlaceMapUnitByAbsMapMatrix()
  *   8.  可选: WorkingMap.ChangeStructureHealth(min, max, destroyP)
@@ -204,7 +204,10 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     }
 
     // 步骤 5-7: 放置地图单元
-    WorkingMap.SetMapUnitByOrder();
+    // 2026-11-18: 改用 SetMapUnitByEntropy（真熵=实际候选数,最约束优先）。
+    // 旧的按列贪心（SetMapUnitByOrder）遇到稀有接口切片池会撞墙回溯上万次
+    // 并留下成片空地；熵序把候选最少的格子趁还有解时先填掉。
+    WorkingMap.SetMapUnitByEntropy();
     WorkingMap.FillRemainingEmptyUnitMap();
     WorkingMap.PlaceMapUnitByAbsMapMatrix();
 

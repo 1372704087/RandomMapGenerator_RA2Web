@@ -161,6 +161,16 @@ export class WeightedRandomizer<T> {
 /** 对应 C# Constants.FailureTimes = 10000 */
 const FAILURE_TIMES = 10000;
 
+/**
+ * 熵序阶段（SetMapUnitByEntropy）的回溯预算（2026-11-18，非 C# 原有）。
+ *
+ * 熵序阶段是"趁还有解先填难格子"的快攻，不是完整 DFS：池子本身有洞时
+ * （如稀有接口没有搭档切片），深回溯只会把整局拆光重演一万次。
+ * 预算耗尽后转纯延迟模式（无解格标记 Deferred 跳过），
+ * 剩余格子交给 FillRemainingEmptyUnitMap 收尾。
+ */
+const BACKTRACK_BUDGET = 32;
+
 // ---------------------------------------------------------------------------
 // WorkingMap static class
 // ---------------------------------------------------------------------------
@@ -889,7 +899,13 @@ export class WorkingMap {
         }
 
         // Waypoints
-        if (waypointList && waypointList.length > 0) {
+        // 只有 spawn 单元负责带出生点；普通地形切片即使含 Waypoint 也不能
+        // 产生额外起点（切片会把源图出生点保留在地形块里）。
+        if (
+          waypointList &&
+          waypointList.length > 0 &&
+          absMapMember.MapUnitName.includes('spawn')
+        ) {
           for (let k = 0; k < waypointList.length; k++) {
             const newWaypoint = waypointList[k].Clone();
             newWaypoint.X =
@@ -1223,6 +1239,18 @@ export class WorkingMap {
     if (WorkingMap.IsValidAMMM(x, y)) {
       WorkingMap.AbstractMapMemberMatrix[x][y].MapUnitName = 'empty';
       WorkingMap.AbstractMapMemberMatrix[x][y].Placed = false;
+      // 解除四邻的延迟标记：它们此前无解可能正是本格的约束所致，
+      // 现在约束放松了，值得重新调度
+      for (const [nx, ny] of [
+        [x, y - 1],
+        [x - 1, y],
+        [x, y + 1],
+        [x + 1, y],
+      ]) {
+        if (WorkingMap.IsValidAMMM(nx, ny)) {
+          WorkingMap.AbstractMapMemberMatrix[nx][ny].Deferred = false;
+        }
+      }
       WorkingMap.UpdateMapUnitInfo();
       console.warn(
         `Delete [${x},${y}] because the next step has no valid options`,
@@ -1254,10 +1282,13 @@ export class WorkingMap {
    * 最多尝试 FAILURE_TIMES 次后放弃。
    */
   public static SetMapUnitByEntropy(): void {
+    // 全量初始化真熵（spawn 先手放置之后）；循环内改为增量维护
+    // （UpdateConnections O(格子) + RefreshEntropyAround O(池)，VERA20k 才跑得动）
+    WorkingMap.UpdateMapUnitInfo();
     let notAllMapUnitsSet = true;
     let failureTimes = 0;
     while (notAllMapUnitsSet) {
-      WorkingMap.UpdateMapUnitInfo();
+      WorkingMap.UpdateConnections();
       notAllMapUnitsSet = false;
       for (let i = 0; i < WorkingMap.AbstractMapMemberMatrix.length; i++) {
         for (
@@ -1326,30 +1357,52 @@ export class WorkingMap {
         }
       }
 
-      // 检查放置某单元后，NE 方向的成员是否仍有有效选项
-      const nearbyAbsMapMemberOfNE = WorkingMap.GetNearbyAbstractMapMemberInfo(
-        targetMapUnit[0],
-        targetMapUnit[1] - 1,
-      );
+      // 检查放置某单元后，北邻 (x,y-1) 是否仍有有效选项（饿死预检）。
+      // 2026-11-18 提速：试放 C 只给北邻新增一条约束 SW == C.NE，且同名剔除
+      // 不可能把非空候选集剔空（它总在 validCount≤1 时停手）⇒ 北邻在试放后
+      // 仍有候选 ⟺ 基候选集中存在 SW == C.NE 的单元。基集直方图 O(池) 建一次、
+      // 每候选 O(1) 判定，替代原来每候选 O(池) 的重算（200×200 从 40s 级降到
+      // 毫秒级）。北邻已放/图外时无饿死可言，整个预检跳过。
+      // 另：基集按 spawn/tiberium 过滤，比旧版（不过滤）更贴近放置时的真实候选。
+      let northSwHistogram: Map<number, number> | null = null;
+      if (WorkingMap.IsValidAMMM(targetMapUnit[0], targetMapUnit[1] - 1)) {
+        const northCell =
+          WorkingMap.AbstractMapMemberMatrix[targetMapUnit[0]][
+            targetMapUnit[1] - 1
+          ];
+        if (northCell.IsOnMap && northCell.MapUnitName === 'empty') {
+          const baseNE = WorkingMap.GetValidAbsMapUnitList(
+            WorkingMap.GetNearbyAbstractMapMemberInfo(
+              targetMapUnit[0],
+              targetMapUnit[1] - 1,
+            ),
+          ).filter(
+            (u) =>
+              !u.MapUnitName.includes('spawn') &&
+              !u.MapUnitName.includes('tiberium'),
+          );
+          northSwHistogram = new Map();
+          for (const u of baseNE) {
+            northSwHistogram.set(
+              u.SWConnectionType,
+              (northSwHistogram.get(u.SWConnectionType) ?? 0) + 1,
+            );
+          }
+        }
+      }
 
-      if (validMapUnitList.length > 0) {
+      if (validMapUnitList.length > 0 && northSwHistogram) {
         for (let i = validMapUnitList.length - 1; i >= 0; i--) {
-          WorkingMap.SetMapUnitTest(
-            targetMapUnit[0],
-            targetMapUnit[1],
-            validMapUnitList[i].MapUnitName,
-          );
-          const validMapUnitListOfNE = WorkingMap.GetValidAbsMapUnitList(
-            nearbyAbsMapMemberOfNE,
-          );
-          if (validMapUnitListOfNE.length < 1) {
+          if (
+            (northSwHistogram.get(validMapUnitList[i].NEConnectionType) ?? 0) ===
+            0
+          ) {
             console.warn(
               validMapUnitList[i].MapUnitName +
                 ' is removed because it will cause further struggle',
             );
             validMapUnitList.splice(i, 1);
           }
-          WorkingMap.DeleteMapUnitTest(targetMapUnit[0], targetMapUnit[1]);
         }
       }
 
@@ -1383,16 +1436,56 @@ export class WorkingMap {
         }
         const result = randomizer.NextWithReplacement();
         WorkingMap.SetMapUnit(targetMapUnit[0], targetMapUnit[1], result);
+        WorkingMap.RefreshEntropyAround(targetMapUnit[0], targetMapUnit[1]);
         console.log(
           `Choose ${result} to place in [${targetMapUnit[0]},${targetMapUnit[1]}]`,
         );
         console.log('');
       } else {
-        // 无有效选项，回溯
-        const previousLocation =
-          WorkingMap.PlacedAbstractMapUnitRecord[
-            WorkingMap.PlacedAbstractMapUnitRecord.length - 1
+        // 无有效候选（2026-11-18 重构）：
+        //  a) 真熵已是 0 —— 当前邻居约束下该格根本无解，且约束只增不减
+        //     （除非某邻居被回溯删除）：标记延迟、跳过，继续放其余格子。
+        //  b) 真熵 > 0 但候选全被失败记录/NE 剪枝过滤，且还有回溯预算 ——
+        //     DFS 回溯一次（拆掉上一个放置换别的选择）。
+        //  c) 回溯预算耗尽 —— 纯延迟模式：无解格一律跳过，交给 Fill 收尾。
+        const targetAmm =
+          WorkingMap.AbstractMapMemberMatrix[targetMapUnit[0]][
+            targetMapUnit[1]
           ];
+        if (targetAmm.Entropy === 0 || failureTimes >= BACKTRACK_BUDGET) {
+          targetAmm.Deferred = true;
+          console.warn(
+            `Deferred [${targetMapUnit[0]},${targetMapUnit[1]}] ` +
+              (targetAmm.Entropy === 0
+                ? '(no candidate under current neighbors)'
+                : '(backtrack budget exhausted)'),
+          );
+          continue;
+        }
+        // 回溯（跳过 spawn：出生点是先放的，删掉会让整张图没有起点）
+        let recordIndex = WorkingMap.PlacedAbstractMapUnitRecord.length - 1;
+        while (recordIndex >= 0) {
+          const [rx, ry] = WorkingMap.PlacedAbstractMapUnitRecord[recordIndex];
+          if (
+            !WorkingMap.AbstractMapMemberMatrix[rx][ry].MapUnitName.includes(
+              'spawn',
+            )
+          ) {
+            break;
+          }
+          recordIndex--;
+        }
+        if (recordIndex < 0) {
+          // 只剩 spawn 可"撤销"但该格仍无解：全部候选被失败记录挡死，
+          // 重试 futile —— 标记延迟而不是放弃整局。
+          targetAmm.Deferred = true;
+          console.warn(
+            `Deferred [${targetMapUnit[0]},${targetMapUnit[1]}] (all candidates blocked by failure records)`,
+          );
+          continue;
+        }
+        const previousLocation =
+          WorkingMap.PlacedAbstractMapUnitRecord[recordIndex];
         const previousName =
           WorkingMap.AbstractMapMemberMatrix[previousLocation[0]][
             previousLocation[1]
@@ -1546,6 +1639,17 @@ export class WorkingMap {
         }
       }
 
+      // spawn / tiberium 由专门方法放置，不能进入普通单元候选
+      // （否则 spawn 地块会被当填充随机摆放，带出额外出生点）
+      for (let i = validMapUnitList.length - 1; i >= 0; i--) {
+        if (
+          validMapUnitList[i].MapUnitName.includes('spawn') ||
+          validMapUnitList[i].MapUnitName.includes('tiberium')
+        ) {
+          validMapUnitList.splice(i, 1);
+        }
+      }
+
       const nearbyAbsMapMemberOfNE = WorkingMap.GetNearbyAbstractMapMemberInfo(
         targetMapUnit[0],
         targetMapUnit[1] - 1,
@@ -1607,10 +1711,27 @@ export class WorkingMap {
         );
         console.log('');
       } else {
+        // 没有任何可放置的单元（例如新 theater 只有 empty 模板）时，
+        // 第一次失败就没有可回溯的上一次放置，直接交给空单元填充。
+        // 回溯时也不删 spawn：出生点是先放的，删掉会让整张图没有起点。
+        let recordIndex = WorkingMap.PlacedAbstractMapUnitRecord.length - 1;
+        while (recordIndex >= 0) {
+          const [rx, ry] = WorkingMap.PlacedAbstractMapUnitRecord[recordIndex];
+          if (
+            !WorkingMap.AbstractMapMemberMatrix[rx][ry].MapUnitName.includes(
+              'spawn',
+            )
+          ) {
+            break;
+          }
+          recordIndex--;
+        }
+        if (recordIndex < 0) {
+          console.error('No valid map unit to place!');
+          return;
+        }
         const previousLocation =
-          WorkingMap.PlacedAbstractMapUnitRecord[
-            WorkingMap.PlacedAbstractMapUnitRecord.length - 1
-          ];
+          WorkingMap.PlacedAbstractMapUnitRecord[recordIndex];
         const previousName =
           WorkingMap.AbstractMapMemberMatrix[previousLocation[0]][
             previousLocation[1]
@@ -1694,8 +1815,14 @@ export class WorkingMap {
             i,
             j,
           );
+          // spawn / tiberium 由专门方法放置；作为普通填充会让 spawn 地块
+          // 带出额外 Waypoint（出生点），所以这里一律排除。
           const validMapUnitList = WorkingMap.GetValidAbsMapUnitList(
             nearbyAbsMapMember,
+          ).filter(
+            (u) =>
+              !u.MapUnitName.includes('spawn') &&
+              !u.MapUnitName.includes('tiberium'),
           );
           const randomizer = new WeightedRandomizer<string>();
           if (validMapUnitList.length > 0) {
@@ -1906,9 +2033,10 @@ export class WorkingMap {
    *
    * 对应 C# GetLowestEntropyMU()。
    * 返回 [i, j] 坐标；无未放置成员时返回 [-1, -1]。
+   * 注意：不再内部刷新 UpdateMapUnitInfo（唯一调用方 SetMapUnitByEntropy
+   * 在每轮循环开头已刷新；真熵刷新是 O(格子×池) 的，省掉重复计算）。
    */
   public static GetLowestEntropyMU(): number[] {
-    WorkingMap.UpdateMapUnitInfo();
     const lowestEntropyMU = [-1, -1];
     let lowestEntropy = Number.MAX_SAFE_INTEGER;
     for (let i = 0; i < WorkingMap.AbstractMapMemberMatrix.length; i++) {
@@ -1921,7 +2049,8 @@ export class WorkingMap {
         if (
           amm.Entropy < lowestEntropy &&
           amm.MapUnitName === 'empty' &&
-          amm.IsOnMap
+          amm.IsOnMap &&
+          !amm.Deferred
         ) {
           lowestEntropy = amm.Entropy;
           lowestEntropyMU[0] = i;
@@ -1937,12 +2066,10 @@ export class WorkingMap {
   // -----------------------------------------------------------------------
 
   /**
-   * 更新所有 AbstractMapMember 的连接状态和熵值。
-   *
-   * 对应 C# UpdateMapUnitInfo()。
-   * 遍历矩阵，根据相邻成员是否已放置来更新四向连接标志和熵值。
+   * 连接标志单调刷新（O(格子)）：邻居已放置 → 该方向已连接。
+   * 供完成性检查（notAllMapUnitsSet）使用，与熵无关。
    */
-  public static UpdateMapUnitInfo(): void {
+  public static UpdateConnections(): void {
     for (let i = 0; i < WorkingMap.AbstractMapMemberMatrix.length; i++) {
       for (
         let j = 0;
@@ -1950,56 +2077,86 @@ export class WorkingMap {
         j++
       ) {
         const amm = WorkingMap.AbstractMapMemberMatrix[i][j];
-        amm.Entropy = 50;
 
         if (WorkingMap.IsValidAMMM(i, j - 1)) {
           if (WorkingMap.AbstractMapMemberMatrix[i][j - 1].MapUnitName !== 'empty') {
             amm.NEConnected = true;
-            amm.Entropy -= 10;
           }
         }
         if (WorkingMap.IsValidAMMM(i, j + 1)) {
           if (WorkingMap.AbstractMapMemberMatrix[i][j + 1].MapUnitName !== 'empty') {
             amm.SWConnected = true;
-            amm.Entropy -= 10;
           }
         }
         if (WorkingMap.IsValidAMMM(i - 1, j)) {
           if (WorkingMap.AbstractMapMemberMatrix[i - 1][j].MapUnitName !== 'empty') {
             amm.NWConnected = true;
-            amm.Entropy -= 10;
           }
         }
         if (WorkingMap.IsValidAMMM(i + 1, j)) {
           if (WorkingMap.AbstractMapMemberMatrix[i + 1][j].MapUnitName !== 'empty') {
             amm.SEConnected = true;
-            amm.Entropy -= 10;
           }
         }
+      }
+    }
+  }
 
-        if (
-          !(
-            amm.SEConnected &&
-            amm.NWConnected &&
-            amm.SWConnected &&
-            amm.NEConnected
-          )
-        ) {
-          if (amm.SEConnected) {
-            amm.Entropy -= 2;
-          }
-          if (amm.NWConnected) {
-            amm.Entropy -= 2;
-          }
-          if (amm.SWConnected) {
-            amm.Entropy -= 2;
-          }
-          if (amm.NEConnected) {
-            amm.Entropy -= 2;
-          }
-        } else {
-          amm.Entropy = 50;
-        }
+  /** 单格真熵：已放/图外 → MAX；否则 = 该格当前实际可放置候选数（排除 spawn/tiberium）。 */
+  private static computeCellEntropyAt(x: number, y: number): number {
+    const amm = WorkingMap.AbstractMapMemberMatrix[x][y];
+    if (!amm.IsOnMap || amm.MapUnitName !== 'empty') {
+      return Number.MAX_SAFE_INTEGER; // 已放/图外格不参与调度
+    }
+    const nearby = WorkingMap.GetNearbyAbstractMapMemberInfo(x, y);
+    return WorkingMap.GetValidAbsMapUnitList(nearby).filter(
+      (u) =>
+        !u.MapUnitName.includes('spawn') &&
+        !u.MapUnitName.includes('tiberium'),
+    ).length;
+  }
+
+  /**
+   * 增量熵刷新：放置/删除 (x,y) 后，只有它自己和四邻的候选集发生变化。
+   * O(池) 级别，供 SetMapUnitByEntropy 每步调用——全量重算是 O(格子×池)，
+   * 每步都做的话 VERA20k（4761 格）会退化到 O(格子²×池)。
+   */
+  public static RefreshEntropyAround(x: number, y: number): void {
+    for (const [nx, ny] of [
+      [x, y],
+      [x, y - 1],
+      [x - 1, y],
+      [x, y + 1],
+      [x + 1, y],
+    ]) {
+      if (!WorkingMap.IsValidAMMM(nx, ny)) continue;
+      WorkingMap.AbstractMapMemberMatrix[nx][ny].Entropy =
+        WorkingMap.computeCellEntropyAt(nx, ny);
+    }
+  }
+
+  /**
+   * 更新所有 AbstractMapMember 的连接状态和熵值。
+   *
+   * 对应 C# UpdateMapUnitInfo()，但熵值改为**真熵**（2026-11-18）：
+   *   熵 = 该空格当前实际可放置的候选数（已排除 spawn/tiberium）。
+   * 旧版熵（50 - 10×已放邻居 - 2×已连接方向）只是"已放邻居数"的粗代理，
+   * 与真实可选度无关；最约束优先放置需要真实候选数，才能把稀有接口的格子
+   * 趁还有解时先填掉，避免按列贪心撞墙后回溯上万次。
+   * 连接标志保持原语义（单调置 true）。
+   * 注意 O(格子×池)：热循环里请用 UpdateConnections + RefreshEntropyAround
+   * 增量维护（见 SetMapUnitByEntropy）。
+   */
+  public static UpdateMapUnitInfo(): void {
+    WorkingMap.UpdateConnections();
+    for (let i = 0; i < WorkingMap.AbstractMapMemberMatrix.length; i++) {
+      for (
+        let j = 0;
+        j < WorkingMap.AbstractMapMemberMatrix[i].length;
+        j++
+      ) {
+        WorkingMap.AbstractMapMemberMatrix[i][j].Entropy =
+          WorkingMap.computeCellEntropyAt(i, j);
       }
     }
   }
@@ -2385,7 +2542,7 @@ export class WorkingMap {
             );
             const colorcombos = value.split('/');
             let index = absTile.SubTile;
-            if (index > colorcombos.length) {
+            if (index >= colorcombos.length) {
               index = 0;
             }
             const colorcombo = colorcombos[index];
