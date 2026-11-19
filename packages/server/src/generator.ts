@@ -14,7 +14,10 @@ import {
   AbstractMapUnit,
   AbstractTileType,
   PreviewImage,
+  Theater,
+  generateUrbanAreas,
 } from '@ra2/core';
+import type { UrbanAreaStats } from '@ra2/core';
 import {
   getTheaterResources,
   getGlobalResources,
@@ -190,6 +193,15 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     WorkingMap.Initialize(width, height, theater.config);
   });
 
+  // 城区数量：Ares 只有一个复选框，具体落几个由引擎按 urbanPresence 决定；
+  // 这里按地图面积折算，`urbanAreas` 传数字时以数字为准。
+  const urbanAreas = options.urbanAreas === true
+    ? Math.max(1, Math.min(8, Math.round((width * height) / 2500)))
+    : typeof options.urbanAreas === 'number'
+      ? options.urbanAreas
+      : 0;
+  let urbanStats: UrbanAreaStats | null = null;
+
   // 步骤 3: 恢复缓存的 AbstractMapUnitList 和 CannotPlaceSmudgeList
   // Initialize 不会重置这两个列表，但我们仍显式恢复以确保正确性
   restoreCachedMapUnits(theater);
@@ -227,14 +239,35 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
       WorkingMap.ChangeStructureHealth(dmgMin, dmgMax, destroyP);
     }
 
+    // 步骤 8b: 可选 - 城区（对齐 Ares「Create Urban Areas」）
+    // 放在损坏建筑之后，城区建筑不会被 ChangeStructureHealth 拆掉；
+    // 放在污迹之前，街道不会被污迹覆盖。
+    if (urbanAreas > 0) {
+      urbanStats = generateUrbanAreas({
+        areas: urbanAreas,
+        theaterName: Theater[WorkingMap.MapTheater] as string,
+        roadTheater: theater.name,
+        minimapContent: globalRes.minimapContent,
+      });
+    }
+
     // 步骤 9: 可选 - 随机污迹
     if (options.smudge && options.smudge > 0) {
       WorkingMap.RandomPlaceSmudge(options.smudge);
     }
-
     // 步骤 10: 准备小地图
     WorkingMap.ReadyForMiniMap(vera20k ? Math.max(MAX_PLAYERS_RETAIL, totalPlayers) : MAX_PLAYERS_RETAIL);
   });
+
+  const urban = urbanStats as UrbanAreaStats | null;
+  if (urban) {
+    console.log(
+      `[generator] urban areas: ${urban.areas} 区 / 街道 ${urban.roadCells} 格 / ` +
+        `建筑 ${urban.structures} / 载具 ${urban.vehicles} / 步兵 ${urban.infantry} ` +
+        `(尝试 ${urban.attempts} 次${urban.areas === 0 ? '，失败原因 ' + JSON.stringify(urban.rejections) : ''})` +
+        (urban.areas > 0 ? ' 位置 ' + urban.locations.map((l) => `${l.dir}@${l.x},${l.y}/${l.len}`).join(' ') : ''),
+    );
+  }
 
   // VERA20k 的容量查询要求 [Waypoints] 0..N-1 全部存在且坐标非 0；
   // 少一个就会退回 8 人，因此这里按实际放置结果硬校验。

@@ -71,6 +71,11 @@ export interface GenerateOptions {
   /** 随机污迹密度 (0-0.5)，不提供或为 0 则不放置污迹 */
   smudge?: number;
   /**
+   * 城区（对齐 Ares 的 Create Urban Areas）：
+   * `true` 由地图尺寸决定数量，数字则直接是指定数量，缺省不生成。
+   */
+  urbanAreas?: boolean | number;
+  /**
    * VERA20k 适配：允许最多 30 个出生点与超大尺寸地图
    * （Width+Height ≤ 1024，最大正方形 512×512；>512 时 overlay 用 1024 网格）。
    */
