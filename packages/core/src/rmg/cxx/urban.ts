@@ -362,9 +362,11 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     /**
      * 一个包围盒里的 `PlacePavedRoads`：横街自顶 +2 行、竖街自左 +5 列，
      * 步进 10；每段取最长可通行连续段（<7 格不要），两端盖端头。
-     * 返回铺出的街段数。
+     * 返回铺出的街段数与切出来的街区矩形。
      */
-    const placeRoadGrid = (bx: number, by: number, bw: number, bh: number, level: number): number => {
+    const placeRoadGrid = (
+        bx: number, by: number, bw: number, bh: number, level: number,
+    ): { streets: number; blocks: Box[] } => {
         // `Proad01` = 1x3（横街，占 3 行）、`Proad02` = 3x1（竖街，占 3 列）。
         // 反过来试过（URBAN_SWAP），渲染只剩一条虚线边，说明现在这对是对的。
         const laneEW = r.pavedRoadsIndex;
@@ -430,6 +432,8 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         const colTaken: number[] = [];
 
         let streets = 0;
+        const rowsPlaced: number[] = [];
+        const colsPlaced: number[] = [];
         for (let y = by + FIRST_ROW_OFFSET; y <= by + bh - 3; y += ROAD_SPACING) {
             if (nearTaken(rowTaken, y)) continue;               // 与已有街相距 <= 3 会出碎路
             const run = longestRun(bx, bx + bw - 1, y, true);
@@ -439,6 +443,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
             if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
             rowTaken.push(y);
+            rowsPlaced.push(y);
             streets++;
         }
         for (let x = bx + FIRST_COL_OFFSET; x <= bx + bw - 5; x += ROAD_SPACING) {
@@ -450,9 +455,23 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
             if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
             colTaken.push(x);
+            colsPlaced.push(x);
             streets++;
         }
-        return streets;
+        // 街区 = 相邻两条横街 / 竖街之间的空地（街本身占 3 格）
+        const blocks: Box[] = [];
+        const xs = [bx - 1, ...colsPlaced, bx + bw];
+        const ys = [by - 1, ...rowsPlaced, by + bh];
+        for (let i = 0; i < ys.length - 1; i++) {
+            for (let j = 0; j < xs.length - 1; j++) {
+                const yTop = (i === 0 ? ys[0]! : ys[i]! + 3);
+                const xLeft = (j === 0 ? xs[0]! : xs[j]! + 3);
+                const w = xs[j + 1]! - xLeft;
+                const h = ys[i + 1]! - yTop;
+                if (w >= 5 && h >= 5) blocks.push({ x: xLeft, y: yTop, w, h });
+            }
+        }
+        return { streets, blocks };
     };
 
     type Box = { x: number; y: number; w: number; h: number };
@@ -473,100 +492,37 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      * 再 `v6 = v5 >> 1` 作为要成功放下的目标 —— 也就是 `[cells/40, cells/20]`，
      * 最后被名单长度封顶（Ares 默认 13 条结构）。
      */
-    const placeStructures = (boxes: Box[], level: number): void => {
-        if (catalog.length === 0 || boxes.length === 0) return;
-        // 城区格子数（包围盒并集；重叠的盒子只算一次）
-        const cellSet = new Set<number>();
-        for (const b of boxes) {
-            for (let y = b.y; y < b.y + b.h; y++) {
-                for (let x = b.x; x < b.x + b.w; x++) cellSet.add(cellKey(x, y));
-            }
+    const placeStructures = (blocks: Box[], level: number): void => {
+        if (catalog.length === 0 || blocks.length === 0) return;
+        // 每块街区放 1~2 栋：先把街区打散，按序填，楼自然沿街排开
+        const order = blocks.slice();
+        for (let i = order.length - 1; i > 0; i--) {
+            const j = randRange(0, i);
+            const t = order[i]!;
+            order[i] = order[j]!;
+            order[j] = t;
         }
-        const cells = cellSet.size;
-        const v2 = Math.max(1, Math.floor(cells / 10));   // 引擎 a1+16 的 cells/10
-        const v3 = Math.max(1, Math.floor(cells / 20));   // cells/20
-        const v5 = randRange(v3, Math.max(v3, v2));
-        // 名单允许重复：引擎每区被 13 条名单封顶，城区就只有一条街的楼；
-        // 想铺满街区就得放开这个上限（属于明确的偏离，不是原版行为）。
-        const count = Math.min(60, Math.max(1, v5 >> 1));
-
-        // 先算出「贴着街的空地」：城区里非街面、且四邻里有一格是街的格子。
-        // 引擎是从城区格子里随机取的；这里改成「离街 1 格」的空地：
-        // 建筑底座要紧贴街道的话，高楼贴图会向上/向两侧伸出底座，
-        // 渲染出来就像楼长在路面上（RA2 的楼是 1~3 格底座 + 大贴图）。
-        const frontage: number[] = [];
-        const frontSet = new Set<number>();
-        const anyRoadAround = (x: number, y: number, r0: number, r1: number): boolean => {
-            for (let dy = -r1; dy <= r1; dy++) {
-                for (let dx = -r1; dx <= r1; dx++) {
-                    const d = Math.max(Math.abs(dx), Math.abs(dy));
-                    if (d < r0 || d > r1) continue;
-                    if (roadSet.has(cellKey(x + dx, y + dy))) return true;
-                }
-            }
-            return false;
-        };
-        for (const b of boxes) {
-            for (let y = b.y; y < b.y + b.h; y++) {
-                for (let x = b.x; x < b.x + b.w; x++) {
-                    const k = cellKey(x, y);
-                    if (roadSet.has(k) || frontSet.has(k)) continue;
-                    if (crowdTaken.has(k)) continue;
-                    if (anyRoadAround(x, y, 1, 1)) continue;       // 紧贴街的不要
-                    if (!anyRoadAround(x, y, 2, 3)) continue;       // 要离街 2~3 格（正对街面）
-                    frontSet.add(k);
-                    frontage.push(k);
-                }
-            }
-        }
-
-        for (let n = 0; n < count; n++) {
-            const type = catalog[randRange(0, catalog.length - 1)]!;
-            for (let tries = 0; tries < 60; tries++) {
-                // 前 40 次按街面空地取点，后 20 次退化为盒子里随机取
-                const cell = tries < 40 && frontage.length > 0
-                    ? (() => {
-                        const k = frontage[randRange(0, frontage.length - 1)]!;
-                        return [Math.floor(k / 8192), k % 8192] as [number, number];
-                    })()
-                    : pickCellIn(boxes);
-                if (cell === null) return;
-                const [px, py] = cell;
-                const maxX = px + type.width;
-                const maxY = py + type.height;
-                if (maxX > cols || maxY > rows) continue;
-                // 底座覆盖格连同它外一圈都不能是街面（贴图会伸出底座）
-                let onRoad = false;
-                for (let dy = -1; dy <= type.height && !onRoad; dy++) {
-                    for (let dx = -1; dx <= type.width; dx++) {
-                        if (roadSet.has(cellKey(px + dx, py + dy))) {
-                            onRoad = true;
-                            break;
-                        }
+        const perBlock = randRange(1, 2);
+        for (const b of order) {
+            for (let k = 0; k < perBlock; k++) {
+                const type = catalog[randRange(0, catalog.length - 1)]!;
+                for (let tries = 0; tries < 12; tries++) {
+                    // 街区内部居中取点，外留 1 格
+                    const px = b.x + Math.floor((b.w - type.width) / 2)
+                        + (tries === 0 ? 0 : randRange(-1, 1));
+                    const py = b.y + Math.floor((b.h - type.height) / 2)
+                        + (tries === 0 ? 0 : randRange(-1, 1));
+                    if (px <= b.x || py <= b.y) continue;
+                    if (px + type.width >= b.x + b.w || py + type.height >= b.y + b.h) continue;
+                    const base = packXY(i16(px), i16(py));
+                    if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) continue;
+                    recordPlacedBuilding(r, base, type.name, type.width, type.height);
+                    for (let dy = 0; dy < type.height; dy++) {
+                        for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
                     }
+                    stats.structures++;
+                    break;
                 }
-                if (onRoad) continue;
-                // 与已放的楼之间留 1 格（否则高楼贴图互相压住，看上去是一整坨）
-                let crowded = false;
-                for (let dy = -1; dy <= type.height && !crowded; dy++) {
-                    for (let dx = -1; dx <= type.width; dx++) {
-                        if (buildingSet.has(cellKey(px + dx, py + dy))) {
-                            crowded = true;
-                            break;
-                        }
-                    }
-                }
-                if (crowded) continue;
-                const base = packXY(i16(px), i16(py));
-                // 引擎的 `TileRectClear` 只查建筑底座覆盖的那几格，不查外圈
-                // （外圈是 `PlaceStructure` 自己的事，城里墙贴墙很正常）
-                if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) continue;
-                recordPlacedBuilding(r, base, type.name, type.width, type.height);
-                for (let dy = 0; dy < type.height; dy++) {
-                    for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
-                }
-                stats.structures++;
-                break;
             }
         }
     };
@@ -651,7 +607,8 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         let centerY = -1;
         let centerLevel = 0;
         const areaStart = placedBoxes.length;   // 本城区之前的盒子（跨城区间距只跟它们比）
-        const areaBoxes: Box[] = [];            // 本城区已落下的包围盒（建筑 / 加人从这里取格）
+        const areaBoxes: Box[] = [];            // 本城区已落下的包围盒（加人从这里取格）
+        const areaBlocks: Box[] = [];           // 街道网格切出来的街区（建筑按街区放）
 
         for (let round = 0; round < ROUNDS_PER_AREA && boxes < BOXES_PER_AREA; round++) {
             stats.attempts++;
@@ -769,23 +726,24 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 continue;
             }
 
-            const streets = placeRoadGrid(bx, by, bw, bh, level);
-            stats.streets += streets;
-            if (streets === 0) {
+            const grid = placeRoadGrid(bx, by, bw, bh, level);
+            stats.streets += grid.streets;
+            if (grid.streets === 0) {
                 reject('norooms');
                 continue;
             }
             placedBoxes.push({ x: bx, y: by, w: bw, h: bh });
             areaBoxes.push({ x: bx, y: by, w: bw, h: bh });
+            areaBlocks.push(...grid.blocks);
             boxes++;
-            stats.locations.push({ x: bx, y: by, w: bw, h: bh, streets });
+            stats.locations.push({ x: bx, y: by, w: bw, h: bh, streets: grid.streets });
         }
         if (boxes === 0) {
             reject('emptyarea');
             continue;
         }
         // 0x5A6510 / 0x5A6920 都是每个城区收尾各跑一次（不是每块包围盒一次）
-        placeStructures(areaBoxes, centerLevel);
+        placeStructures(areaBlocks, centerLevel);
         placeCrowd(areaBoxes, centerLevel);
         stats.areas++;
     }
