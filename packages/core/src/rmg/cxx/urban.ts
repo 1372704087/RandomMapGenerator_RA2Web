@@ -392,13 +392,23 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             return good[iy * gw + ix] === 1;
         };
 
+        // 一条街是 3 格宽的带（Proad 图块画幅 1x3 / 3x1），所以清不清要看整条带：
+        // 引擎的 `sub_5A7250` 也是拿 3x4 / 3x1 的矩形去判，
+        // 只查锚点那一行会让街压到矿田、树林、海滩上。
+        const bandOk = (i: number, fixed: number, horizontal: boolean): boolean => {
+            for (let k = 0; k < 3; k++) {
+                if (horizontal ? !ok(i, fixed + k) : !ok(fixed + k, i)) return false;
+            }
+            return true;
+        };
+
         const longestRun = (from: number, to: number, fixed: number, horizontal: boolean): [number, number] | null => {
             let bestStart = -1;
             let bestLen = 0;
             let curStart = -1;
             let curLen = 0;
             for (let i = from; i <= to; i++) {
-                const good = horizontal ? ok(i, fixed) : ok(fixed, i);
+                const good = bandOk(i, fixed, horizontal);
                 if (good) {
                     if (curStart < 0) curStart = i;
                     curLen++;
