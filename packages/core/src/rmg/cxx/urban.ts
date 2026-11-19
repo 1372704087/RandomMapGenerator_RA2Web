@@ -5,20 +5,24 @@
  * `recalculateCellAttributes` 之后 `CALL(0x5A5020)`（本仓库 cxx 管线同位置）。
  *
  * 引擎侧的城区由三个函数组成，本文件按它们的语义重写：
- *   `0x5A5360`  随机游走出一条街区脊线（8 邻域 best-first，键 = max(|dx|,|dy|) + rand*3），
- *               收集够长的路径后取包围盒，路径太「瘦」（count*1.6 <= w*h）就整条作废；
+ *   `0x5A5360`  从锚点长出一条路径（8 邻域 best-first，键 = max(|dx|,|dy|) + rand*3，
+ *               已访问格标 `work[+15]`），收满目标长度后取包围盒；路径太「瘦」
+ *               （`count*1.6 <= w*h`）就整条作废；
  *   `0x5A5B50`  在包围盒里按 10 格间距铺横/竖街道，两端各盖端头；
  *   `0x5A6510`  沿街放建筑。
+ * 每个城区最多 10 轮（`cmp ebp,0xA`），每轮重新取锚点长路径、重新取包围盒。
  *
- * 街道的图块语义是这一版的关键（全部由手工城市块实测反推）：
+ * 街道图块语义（theater 全局素材，与切片 / 手工单元那套没有关系）：
  *   * 一条街 = 一串同向的 `Proad01/02`（温带 293/294）。它们不是 1 格图块：
- *     `Proad01` 的 TMP 画幅是 1852×952 像素（约 30 格长的一条完整街道，
- *     沥青 + 白边线 + 中线虚线 + 人行道），盖一次就画一整条街；
+ *     `Proad01.tem` 的 TMP 头是 `cellsInX=1 cellsInY=3`，子帧 1852×952 像素
+ *     （约 30 格长的一条完整街道：沥青 + 白边线 + 中线虚线 + 人行道），
+ *     盖一次就画一整条街；
  *   * 因此必须走 `sub_5A6C10`（本仓库 `placeWaterDetailTile`）多格盖章，
- *     它会写 `cell.height = 子格序号`。上一版只写 `isoTileTypeIndex`、
- *     子格序号留着地形值，画出来就只有一条细边 —— 这是「效果太烂」的真因；
- *   * 端头 `p_end`（温带 445/446/447/448）：+0 横街远端、+1 竖街北端、
- *     +2 横街近端、+3 竖街南端（与 `MapGenMapFile` 桥面路段的端头编号一致）。
+ *     它会写 `cell.height = 子格序号`。只写 `isoTileTypeIndex`、子格序号留着
+ *     地形值的写法画出来只有一条细边；
+ *   * 端头号取自 theater INI 的 `[General] PavedRoadEnds`（温带 445..448）：
+ *     +0 横街远端、+1 竖街北端、+2 横街近端、+3 竖街南端，
+ *     与 `MapGenMapFile.cpp` 桥面路段的端头编号一致；中隔取 `[General] Medians`。
  *
  * 名单不读 rmgmd.ini（仓库里没有这个文件），直接硬编码 Ares 的默认值。
  */
@@ -258,49 +262,89 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         return null;
     };
 
-    const maxAttempts = Math.max(40, options.areas * 60);
+    /**
+     * `0x5A5360` 的生长：8 邻域 best-first，键 = `max(|dx|,|dy|) + rand*3`
+     * （dx/dy 相对起点）。键随距离单调增长，所以长出来的是一团带抖动的菱形，
+     * 正是城区需要的块状；访问过的格子只入堆一次（对应 `work[+15] = 1`）。
+     */
+    const growPath = (sx: number, sy: number, level: number, target: number): { x: number; y: number }[] => {
+        const key = (x: number, y: number): number => x * 8192 + y;
+        const seen = new Set<number>();
+        const heap: { x: number; y: number; k: number }[] = [];
+
+        const push = (x: number, y: number): void => {
+            const k = Math.max(Math.abs(x - sx), Math.abs(y - sy)) + r.rng.unit() * 3;
+            heap.push({ x, y, k });
+            let i = heap.length - 1;
+            while (i > 0) {
+                const p = (i - 1) >> 1;
+                if (heap[p]!.k <= heap[i]!.k) break;
+                const t = heap[p]!;
+                heap[p] = heap[i]!;
+                heap[i] = t;
+                i = p;
+            }
+        };
+        const pop = (): { x: number; y: number; k: number } | null => {
+            if (heap.length === 0) return null;
+            const top = heap[0]!;
+            const last = heap.pop()!;
+            if (heap.length !== 0) {
+                heap[0] = last;
+                let i = 0;
+                for (;;) {
+                    const l = i * 2 + 1;
+                    const rr = l + 1;
+                    let m = i;
+                    if (l < heap.length && heap[l]!.k < heap[m]!.k) m = l;
+                    if (rr < heap.length && heap[rr]!.k < heap[m]!.k) m = rr;
+                    if (m === i) break;
+                    const t = heap[m]!;
+                    heap[m] = heap[i]!;
+                    heap[i] = t;
+                    i = m;
+                }
+            }
+            return top;
+        };
+
+        seen.add(key(sx, sy));
+        push(sx, sy);
+        const path: { x: number; y: number }[] = [];
+        while (path.length < target) {
+            const node = pop();
+            if (node === null) break;
+            path.push({ x: node.x, y: node.y });
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = node.x + dx;
+                    const ny = node.y + dy;
+                    if (seen.has(key(nx, ny))) continue;
+                    if (cellOkForRoad(r, nx, ny, level) !== null) continue;
+                    seen.add(key(nx, ny));
+                    push(nx, ny);
+                }
+            }
+        }
+        return path;
+    };
+
+    const maxAttempts = Math.max(60, options.areas * 80);
     const placedBoxes: { x: number; y: number; w: number; h: number }[] = [];
-    while (stats.areas < options.areas && stats.attempts < maxAttempts) {
-        stats.attempts++;
-        const bw = randRange(sizeMin, sizeMax);
-        const bh = randRange(sizeMin, sizeMax);
-        const corner = randomCorner(Math.max(bw, bh));
-        if (corner === null) {
-            reject('anchor');
-            continue;
-        }
-        const [bx, by] = corner;
-        const level = r.cellAt(bx, by).level;
+    const rowTaken: number[] = [];
+    const colTaken: number[] = [];
+    const nearTaken = (list: number[], v: number): boolean => list.some((n) => Math.abs(n - v) <= 3);
 
-        // 城区之间留 3 格空隙：两套栅格叠在一起会出现 1 格宽的碎路
-        if (placedBoxes.some((b) => !(bx + bw + 3 < b.x || bx > b.x + b.w + 3
-            || by + bh + 3 < b.y || by > b.y + b.h + 3))) {
-            reject('overlap');
-            continue;
-        }
-
-        // ---- 校验锚点：逐段校验交给下面的「最长可通行段」剪裁 --------------
-        const anchorWhy = cellOkForRoad(r, bx, by, level);
-        if (anchorWhy !== null) {
-            reject(anchorWhy);
-            continue;
-        }
-        if (nearStart(bx, by)) {
-            reject('startingpoint');
-            continue;
-        }
-
-        // ---- 街道栅格：横街 / 竖街各按 10 格间距铺满包围盒 ----------------
-        //
-        // gamemd 的 0x5A5B50 对每段都先做 TileRectClear，不清就不铺；
-        // 这里等价地取「区间内最长的可通行连续段」，段长 < 6 就整段不要。
-        const laneEW = r.pavedRoadsIndex;      // Proad01：东西向
-        const laneNS = r.pavedRoadsIndex + 1;  // Proad02：南北向
+    /**
+     * 一个包围盒里的 `PlacePavedRoads`：横街自顶 +2 行、竖街自左 +5 列，
+     * 步进 10；每段取最长可通行连续段（<7 格不要），两端盖端头。
+     * 返回铺出的街段数。
+     */
+    const placeRoadGrid = (bx: number, by: number, bw: number, bh: number, level: number): number => {
+        const laneEW = r.pavedRoadsIndex;
+        const laneNS = r.pavedRoadsIndex + 1;
         const ends = r.pavedRoadEndsIndex;
-        let streets = 0;
-        const roadRows: number[] = [];
-        const roadCols: number[] = [];
-
         const ok = (x: number, y: number): boolean => cellOkForRoad(r, x, y, level) === null;
 
         const longestRun = (from: number, to: number, fixed: number, horizontal: boolean): [number, number] | null => {
@@ -322,24 +366,26 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                     curLen = 0;
                 }
             }
-            return bestLen >= 6 ? [bestStart, bestStart + bestLen - 1] : null;
+            return bestLen >= 7 ? [bestStart, bestStart + bestLen - 1] : null;
         };
 
+        let streets = 0;
         for (let y = by + FIRST_ROW_OFFSET; y <= by + bh - 3; y += ROAD_SPACING) {
+            if (nearTaken(rowTaken, y)) continue;               // 与已有街相距 <= 3 会出碎路
             const run = longestRun(bx, bx + bw - 1, y, true);
             if (run === null) continue;
             const [x0, x1] = run;
             for (let x = x0; x <= x1; x++) stamp(laneEW, x, y);
-            // 两条车行道之间的中央带：theater 有 Medians 族就填铺装，否则留原地形
             if (r.mediansIndex >= 0) {
                 for (let x = x0; x <= x1; x++) stamp(r.mediansIndex, x, y + 1);
             }
-            if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);   // 西端（近端）
-            if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);   // 东端（远端）
-            roadRows.push(y);
+            if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
+            if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
+            rowTaken.push(y);
             streets++;
         }
         for (let x = bx + FIRST_COL_OFFSET; x <= bx + bw - 5; x += ROAD_SPACING) {
+            if (nearTaken(colTaken, x)) continue;
             const run = longestRun(by, by + bh - 1, x, false);
             if (run === null) continue;
             const [y0, y1] = run;
@@ -347,31 +393,28 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (r.mediansIndex >= 0) {
                 for (let y = y0; y <= y1; y++) stamp(r.mediansIndex, x + 1, y);
             }
-            if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);   // 北端
-            if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);   // 南端
-            roadCols.push(x);
+            if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
+            if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
+            colTaken.push(x);
             streets++;
         }
+        return streets;
+    };
 
-        stats.streets += streets;
-        if (streets === 0) {
-            reject('norooms');
-            stats.areas++;
-            stats.locations.push({ x: bx, y: by, w: bw, h: bh, streets: 0 });
-            continue;
-        }
-        placedBoxes.push({ x: bx, y: by, w: bw, h: bh });
-
-        // ---- 建筑：只落在街道之间的街区内（离任一条街 >= 4 格）-----------
-        const count = catalog.length === 0 ? 0 : randRange(stMin, stMax);
+    /** `PlaceUrbanStructures`：建筑只落在街区里（离任一条街 >= 4 格） */
+    const placeStructures = (bx: number, by: number, bw: number, bh: number, level: number): void => {
+        if (catalog.length === 0) return;
+        const count = randRange(stMin, stMax);
         for (let n = 0; n < count; n++) {
             const type = catalog[randRange(0, catalog.length - 1)]!;
+            const maxX = bx + bw - type.width - 2;
+            const maxY = by + bh - type.height - 2;
+            if (maxX < bx + 2 || maxY < by + 2) return;
             for (let tries = 0; tries < 12; tries++) {
-                const px = randRange(bx + 2, bx + bw - type.width - 2);
-                const py = randRange(by + 2, by + bh - type.height - 2);
-                // 离街道太近会压到路面 / 端头
-                if (roadRows.some((ry) => Math.abs(py - ry) < 4 && py !== ry)) continue;
-                if (roadCols.some((cx) => Math.abs(px - cx) < 4)) continue;
+                const px = randRange(bx + 2, maxX);
+                const py = randRange(by + 2, maxY);
+                if (rowTaken.some((ry) => Math.abs(py - ry) < 4)) continue;
+                if (colTaken.some((cx) => Math.abs(px - cx) < 4)) continue;
                 const base = packXY(i16(px), i16(py));
                 if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 1)) continue;
                 recordPlacedBuilding(r, base, type.name, type.width, type.height);
@@ -379,9 +422,126 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 break;
             }
         }
+    };
 
+    /**
+     * 一个城区 = 最多 10 轮（`cmp ebp,0xA`）：每轮重新取锚点、长路径、取包围盒、铺路。
+     * 10 轮是同一个城区的重复落脚，所以锚点都围着城区中心取，铺出的包围盒允许互相重叠
+     * （同一城区的街可以咬合），只有跨城区时才强制留 3 格空隙。
+     */
+    const ROUNDS_PER_AREA = 10;
+    const BOXES_PER_AREA = 3;
+
+    /** 在中心附近取一个可铺路的点 */
+    const randomNear = (cx: number, cy: number, radius: number, level: number): [number, number] | null => {
+        for (let i = 0; i < 16; i++) {
+            const x = cx + randRange(-radius, radius);
+            const y = cy + randRange(-radius, radius);
+            if (!r.cellExists(x, y)) continue;
+            if (r.cellAt(x, y).level !== level) continue;
+            if (cellOkForRoad(r, x, y, level) !== null) continue;
+            return [x, y];
+        }
+        return null;
+    };
+
+    while (stats.areas < options.areas && stats.attempts < maxAttempts) {
+        let boxes = 0;
+        let centerX = -1;
+        let centerY = -1;
+        let centerLevel = 0;
+
+        for (let round = 0; round < ROUNDS_PER_AREA && boxes < BOXES_PER_AREA; round++) {
+            stats.attempts++;
+
+            // 路径目标长度：引擎是 `(2*w*h)/15`，再夹进 [100,2000]；城区第二轮起短一些
+            const baseLen = (2 * cols * rows) / 15;
+            const scale = round === 0 ? 1.0 : 0.55;
+            const length = Math.round(scale * randRange(
+                Math.max(100, baseLen * 0.5), Math.min(2000, baseLen)));
+
+            // 首轮：全图随便挑一个空位当城区中心；后续轮：围着这个中心找锚点
+            let ax: number;
+            let ay: number;
+            let level: number;
+            if (round === 0) {
+                const span = Math.min(sizeMax, Math.max(8, Math.round(Math.sqrt(length) * 1.6)));
+                const corner = randomCorner(span);
+                if (corner === null) {
+                    reject('anchor');
+                    continue;
+                }
+                [ax, ay] = corner;
+                level = r.cellAt(ax, ay).level;
+
+                const anchorWhy = cellOkForRoad(r, ax, ay, level);
+                if (anchorWhy !== null) {
+                    reject(anchorWhy);
+                    continue;
+                }
+                if (nearStart(ax, ay)) {
+                    reject('startingpoint');
+                    continue;
+                }
+                if (placedBoxes.some((b) => !(ax + span + 3 < b.x || ax > b.x + b.w + 3
+                    || ay + span + 3 < b.y || ay > b.y + b.h + 3))) {
+                    reject('overlap');
+                    continue;
+                }
+                centerX = ax;
+                centerY = ay;
+                centerLevel = level;
+            } else {
+                const near = randomNear(centerX, centerY, Math.round(sizeMax * 0.6), centerLevel);
+                if (near === null) {
+                    reject('nearanchor');
+                    continue;
+                }
+                [ax, ay] = near;
+                level = centerLevel;
+            }
+
+            const path = growPath(ax, ay, level, length);
+            if (path.length < 20) {
+                reject('path');
+                continue;
+            }
+
+            let bx = ax;
+            let by = ay;
+            let bx1 = ax;
+            let by1 = ay;
+            for (const c of path) {
+                if (c.x < bx) bx = c.x;
+                if (c.x > bx1) bx1 = c.x;
+                if (c.y < by) by = c.y;
+                if (c.y > by1) by1 = c.y;
+            }
+            const bw = Math.min(bx1 - bx + 1, sizeMax);
+            const bh = Math.min(by1 - by + 1, sizeMax);
+
+            // 太瘦：路径填不满包围盒（0x5A5360 的整条作废条件）
+            if (path.length * 1.6 <= bw * bh) {
+                reject('thin');
+                continue;
+            }
+
+            const streets = placeRoadGrid(bx, by, bw, bh, level);
+            stats.streets += streets;
+            if (streets === 0) {
+                reject('norooms');
+                continue;
+            }
+            placedBoxes.push({ x: bx, y: by, w: bw, h: bh });
+            placeStructures(bx, by, bw, bh, level);
+            boxes++;
+            stats.locations.push({ x: bx, y: by, w: bw, h: bh, streets });
+        }
+        if (boxes === 0) {
+            reject('emptyarea');
+            continue;
+        }
         stats.areas++;
-        stats.locations.push({ x: bx, y: by, w: bw, h: bh, streets });
     }
 
     diag(

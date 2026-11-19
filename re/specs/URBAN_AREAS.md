@@ -50,16 +50,19 @@ Proad02.tem  cellsInX=3 cellsInY=1（三个子格沿 +x 偏移 +30/+15）
   只写 `isoTileTypeIndex`、子格序号留着地形值的写法，画出来是一条细边；
 * 手工城市块里可以观察到两种写法并存（`447` 端头存 `sub=0/1/2` 三格，
   而 `293` 直段常只存 `sub=0`），引擎两种都能画，但只有多格盖章能拿到完整街宽。
-
 因此本实现统一走 `placeWaterDetailTile`（= `0x5A6C10`），并在盖章前用
 `ensureRichFootprints` 把街道 / 端头 / 铺装族的 TMP 画幅灌进
 `r.tileFootprintOverrides`（`findFamilyFootprint` 只给悬崖、岸边等族备了静态表）。
 
-## 3. 图块语义（手工城市块实测反推）
+## 3. 图块语义（TMP 头 + theater INI）
 
 图块号 = 前面所有 `TilesInSet` 之和 + 局部序号。`packages/server/resources/theater/*.ini`
-与实图同源（`PavedRoads = 20`、`PavedRoadEnds = 36`、`Medians = 40`），
+与 TMP 头同源（`PavedRoads = 20`、`PavedRoadEnds = 36`、`Medians = 40`），
 `cxx` 的 `loadTheaterTiles` 已经算出这些基址，直接读 `r.pavedRoadsIndex` 等字段。
+
+> 这套素材是 theater 全局的，和切片管线 / `MapUnits/*/_terrain/*.map` 那批手工块没有关系：
+> 手工块属于切片那套「手工单元素材」，这里只是拿成品地图核对过图块号在真实存盘里的用法，
+> 不作为城区布局或街道形态的依据。
 
 | 用途 | 温带 | 说明 |
 | --- | --- | --- |
@@ -92,19 +95,30 @@ NEWURBAN  = 温带编号                        中隔 856
    （`clearToPaveLatIndex` 块，`paveTileIndex` + `[[miscPave,13],[medians,13],[pavedRoads,20]]`）
    自动按邻接掩码修边。
 
-## 4. 落位与铺法
+## 4. 落位与铺法（按 `0x5A5020` 的顺序）
 
-* 锚点在菱形坐标里取样：合法格满足 `mapWidth < x+y <= mapWidth+2*mapHeight` 且 `|x-y| < mapWidth`，
-  按 `(s=x+y, d=|x-y|)` 取样再反解 `x/y`（同奇偶），比在大网格里随机 slot 碰运气稳得多；
-* 每个城区取一个 `22..32` 格的包围盒；**城区之间强制 3 格空隙**（两套栅格叠在一起会出现 1 格宽碎路）；
-* 横街从包围盒顶 +2 行开始、竖街从左 +5 列开始，步进 10 格（`0x5A5B50` 的步进）；
-* 每段先算「区间内最长的可通行连续段」，段长 < 6 就整段放弃，否则铺车道 + 中隔 + 两端端头；
-  等价于 `0x5A5B50` 里每段先做 `TileRectClear` 再盖；
-* 每格要求：在图上、`level` 与锚点相同（不压平 —— 压平会让 FA2 打开 SNOW `043.map` 崩溃）、
-  可通行、无 overlay、`isoTileTypeIndex != 0xFFFF`；
-* 离出生点 Chebyshev ≤ 安全半径（默认 10）的锚点放弃；
-* 建筑落在街区里（离任一条街 ≥ 4 格），逐栋走 `foundationFitsAtFlat(apron=1)`
-  （同高、平坦、周边 1 格净空），写入 `structures` 表（`houseName=None House`、`facing=256`）。
+一个城区 = 最多 10 轮（`cmp ebp,0xA`），每轮都是「取锚点 → 长路径 → 取包围盒 → 铺路」：
+
+1. **取锚点**：首轮在全图空位里取城区中心（菱形坐标取样：合法格满足
+   `mapWidth < x+y <= mapWidth+2*mapHeight` 且 `|x-y| < mapWidth`，按 `(s=x+y, d=|x-y|)`
+   取样再反解 `x/y`，同奇偶）；后续轮在城区中心 `sizeMax*0.6` 范围内取样 ——
+   这 10 轮本来就是同一个城区的重复落脚。
+2. **长路径**（`0x5A5360`）：8 邻域 best-first，优先键 `max(|dx|,|dy|) + rand*3`
+   （相对起点），已访问格只入堆一次；目标长度 `(2*w*h)/15` 夹进 `[100,2000]`
+   （77×85 时约 872，第二轮起按 0.55 折减）。键随距离单调增长，长出来的是一团带抖动的菱形。
+3. **取包围盒**：路径的 min/max，边长再夹到 `sizeMax`。
+4. **瘦包围盒作废**：`path.length * 1.6 <= w*h` 时整条丢弃（引擎原条件）。
+5. **铺路**（`0x5A5B50`）：横街从包围盒顶 +2 行、竖街从左 +5 列开始，步进 10 格；
+   每段先算「区间内最长的可通行连续段」，段长 < 7 就整段放弃，否则铺车道 + 中隔 + 两端端头
+   （等价于引擎每段先 `TileRectClear` 再盖）。同一城区内的包围盒允许重叠，
+   与已有街相距 ≤ 3 格的横/竖街直接跳过，避免叠出 1 格宽碎路。
+6. **跨城区**：第一个包围盒与其它城区的盒子强制 3 格空隙。
+
+每格要求：在图上、`level` 与锚点相同（不压平 —— 压平会让 FA2 打开 SNOW `043.map` 崩溃）、
+可通行、无 overlay、`isoTileTypeIndex != 0xFFFF`；离出生点 Chebyshev ≤ 安全半径（默认 10）的锚点放弃。
+
+建筑落在街区里（离任一条街 ≥ 4 格），逐栋走 `foundationFitsAtFlat(apron=1)`
+（同高、平坦、周边 1 格净空），写入 `structures` 表（`houseName=None House`、`facing=256`）。
 
 数量：`urbanAreas: true` 按面积折算 `clamp(round(w*h/2500), 1, 8)`；传数字以数字为准。
 （引擎的公式是 `ftol((MapSeedClass+0x60 + 0.32) * 3.0)` 与概率门 `randUnit() < 1 - field60`，
@@ -133,7 +147,7 @@ node scripts\extract-theater-tiles.mjs --game-dir "F:/Red-Alert-2-Yuris-Revenge"
 
 | 位置 | 作用 |
 | --- | --- |
-| `packages/core/src/rmg/cxx/urban.ts` | `addUrbanAreas(rmg, {areas})`：包围盒 → 街道栅格 → 端头 → 建筑；`ensureRichFootprints`、`cellOkForRoad`、`loadCatalogs` |
+| `packages/core/src/rmg/cxx/urban.ts` | `addUrbanAreas(rmg, {areas})`：`growPath`（`0x5A5360`）→ 包围盒 → `placeRoadGrid`（`0x5A5B50`）→ `placeStructures`（`0x5A6510`）；`ensureRichFootprints`、`cellOkForRoad`、`loadCatalogs` |
 | `packages/core/src/rmg/cxx/river.ts` | `placeWaterDetailTile`（`sub_5A6C10`）逐子格盖章 |
 | `packages/core/src/rmg/cxx/recalc.ts` | `setupLAT` 的 pave 块负责路口 / 街沿自动修边 |
 | `packages/core/src/rmg/cxx/generate.ts` | 挂钩：`0x598FB8` 之后、`0x59912A` 之前，跟一行 `scanMaxLevel('after-urban')` |
@@ -167,8 +181,10 @@ node scratch\urban-run.mjs <theater> <seed>       # 端到端生成 + 渲染
 
 ## 8. 已知限制
 
-* 街道是「包围盒栅格」，不是 `0x5A5360` 那条随机游走脊线本身：
-  只借用它的包围盒 + `0x5A5B50` 的 10 格步进，街段不会跟着游走路径弯曲；
+* 街道是包围盒栅格，不跟着 `0x5A5360` 的路径弯曲：路径只用来定包围盒（引擎也只在包围盒里铺路），
+  所以同一轮里铺出来的是正交网格，不是一条蜿蜒的曲线街；
+* 每轮 10 轮的上限、`BOXES_PER_AREA = 3`（一个城区最多 3 块包围盒）是本仓库的收敛上限，
+  引擎那 10 轮没有「最多几块盒子」的限制；
 * 载具 / 步兵未实现（`.map` 没有 `[Units]` / `[Infantry]` 段）；
 * `SNOW` 没有 `Medians`，中央带是原地形；
 * `LUNAR` 没有城区素材（`PavedRoads = -1`），直接跳过。
