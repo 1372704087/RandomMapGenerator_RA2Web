@@ -385,10 +385,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             const run = longestRun(bx, bx + bw - 1, y, true);
             if (run === null) continue;
             const [x0, x1] = run;
-            for (let x = x0; x <= x1; x++) stamp(laneEW, x, y);
-            if (r.mediansIndex >= 0) {
-                for (let x = x0; x <= x1; x++) stamp(r.mediansIndex, x, y + 1);
-            }
+            for (let x = x0; x <= x1; x++) stamp(laneEW, x, y);   // 每格一次，图块自带 1x3 画幅
             if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
             if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
             rowTaken.push(y);
@@ -399,10 +396,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             const run = longestRun(by, by + bh - 1, x, false);
             if (run === null) continue;
             const [y0, y1] = run;
-            for (let y = y0; y <= y1; y++) stamp(laneNS, x, y);
-            if (r.mediansIndex >= 0) {
-                for (let y = y0; y <= y1; y++) stamp(r.mediansIndex, x + 1, y);
-            }
+            for (let y = y0; y <= y1; y++) stamp(laneNS, x, y);   // 同上，图块自带 3x1 画幅
             if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
             if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
             colTaken.push(x);
@@ -450,10 +444,39 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         const v3 = Math.max(1, Math.floor(cells / 20));   // cells/20
         const v5 = randRange(v3, Math.max(v3, v2));
         const count = Math.min(names.length, Math.max(1, v5 >> 1));
+
+        // 先算出「贴着街的空地」：城区里非街面、且四邻里有一格是街的格子。
+        // 引擎是从城区格子里随机取的，随机取在 32x32 的盒子里会堆成一小团；
+        // 按「面朝街道的空地」优先铺，街区才会沿街排开。
+        const frontage: number[] = [];
+        const frontSet = new Set<number>();
+        for (const b of boxes) {
+            for (let y = b.y; y < b.y + b.h; y++) {
+                for (let x = b.x; x < b.x + b.w; x++) {
+                    const k = cellKey(x, y);
+                    if (roadSet.has(k) || frontSet.has(k)) continue;
+                    if (crowdTaken.has(k)) continue;
+                    const touches =
+                        roadSet.has(cellKey(x + 1, y)) || roadSet.has(cellKey(x - 1, y)) ||
+                        roadSet.has(cellKey(x, y + 1)) || roadSet.has(cellKey(x, y - 1));
+                    if (touches) {
+                        frontSet.add(k);
+                        frontage.push(k);
+                    }
+                }
+            }
+        }
+
         for (let n = 0; n < count; n++) {
             const type = names[n]!;
             for (let tries = 0; tries < 60; tries++) {
-                const cell = pickCellIn(boxes);
+                // 前 40 次按街面空地取点，后 20 次退化为盒子里随机取
+                const cell = tries < 40 && frontage.length > 0
+                    ? (() => {
+                        const k = frontage[randRange(0, frontage.length - 1)]!;
+                        return [Math.floor(k / 8192), k % 8192] as [number, number];
+                    })()
+                    : pickCellIn(boxes);
                 if (cell === null) return;
                 const [px, py] = cell;
                 const maxX = px + type.width;
@@ -493,10 +516,14 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
 
         while (placed < total && rounds < 2 * total) {
             rounds++;
-            const slot = randRange(0, 6);
-            const isInfantry = slot <= 2;
+            // Ares 的 `5A6998`：在「步兵表 + 载具表」合起来的长度里取一个号，
+            // 小于步兵表长度就是步兵，否则减掉步兵长度去取载具。
+            const infantryCount = ARES_URBAN_INFANTRY.length;
+            const poolSize = infantryCount + ARES_URBAN_VEHICLES.length;
+            if (poolSize === 0) break;
+            const index = randRange(0, poolSize - 1);
+            const isInfantry = index < infantryCount;
             const list = isInfantry ? ARES_URBAN_INFANTRY : ARES_URBAN_VEHICLES;
-            if (list.length === 0) break;
             const type = list[randRange(0, list.length - 1)]!;
             const facing = 32 * randRange(0, 7);
 
@@ -530,8 +557,8 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      * 10 轮是同一个城区的重复落脚，所以锚点都围着城区中心取，铺出的包围盒允许互相重叠
      * （同一城区的街可以咬合），只有跨城区时才强制留 3 格空隙。
      */
-    const ROUNDS_PER_AREA = 10;
-    const BOXES_PER_AREA = ROUNDS_PER_AREA;   // 引擎的 10 轮都能落脚，没有「最多几块」的上限
+    const ROUNDS_PER_AREA = 10;          // 引擎的 10 轮是「这一片最多试 10 次」
+    const BOXES_PER_AREA = 1;            // 一个城区最终只落一块包围盒（多块叠起来会铺满全图）
 
     /** 在中心附近取一个可铺路的点（先按给定半径，找不到就逐级放宽） */
     const randomNear = (cx: number, cy: number, radius: number, level: number): [number, number] | null => {
