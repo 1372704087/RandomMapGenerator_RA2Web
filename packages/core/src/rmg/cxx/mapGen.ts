@@ -30,6 +30,7 @@ import {
     ElevationEntry,
     MapRegion,
     MapStructureRec,
+    MapObjectRec,
     MapTerrainObjectRec,
     StartingPointRecord,
     TileCellAttr,
@@ -335,6 +336,8 @@ export class Rmg {
 
     // ledgers
     structures: MapStructureRec[] = [];
+    units: MapObjectRec[] = [];
+    infantry: MapObjectRec[] = [];
     terrainObjects: MapTerrainObjectRec[] = [];
     waypoints: number[] = new Array(702).fill(0);
     startingPoints: StartingPointRecord[] = [];

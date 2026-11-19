@@ -147,8 +147,11 @@ node scripts\extract-theater-tiles.mjs --game-dir "F:/Red-Alert-2-Yuris-Revenge"
 
 | 位置 | 作用 |
 | --- | --- |
-| `packages/core/src/rmg/cxx/urban.ts` | `addUrbanAreas(rmg, {areas})`：`growPath`（`0x5A5360`）→ 包围盒 → `placeRoadGrid`（`0x5A5B50`）→ `placeStructures`（`0x5A6510`）；`ensureRichFootprints`、`cellOkForRoad`、`loadCatalogs` |
+| `packages/core/src/rmg/cxx/urban.ts` | `addUrbanAreas(rmg, {areas})`：`growPath`（`0x5A5360`）→ 包围盒 → `placeRoadGrid`（`0x5A5B50`）→ `placeStructures`（`0x5A6510`）→ `placeCrowd`（`0x5A6920`）；`ensureRichFootprints`、`cellOkForRoad`、`loadCatalogs` |
 | `packages/core/src/rmg/cxx/river.ts` | `placeWaterDetailTile`（`sub_5A6C10`）逐子格盖章 |
+| `packages/core/src/rmg/cxx/mapFile.ts` | `[Units]` / `[Infantry]` 两段写出（14 字段行，照成品地图） |
+| `packages/core/src/rmg/cxx/types.ts` | `MapObjectRec`（coords / typeName / houseName / facing / subCell） |
+| `packages/core/src/rmg/cxx/mapGen.ts` | `Rmg.units` / `Rmg.infantry` 两个账本 |
 | `packages/core/src/rmg/cxx/recalc.ts` | `setupLAT` 的 pave 块负责路口 / 街沿自动修边 |
 | `packages/core/src/rmg/cxx/generate.ts` | 挂钩：`0x598FB8` 之后、`0x59912A` 之前，跟一行 `scanMaxLevel('after-urban')` |
 | `packages/server/src/rmgCxxService.ts` | `CxxGenerateInput.urbanAreas?: boolean \| number` |
@@ -160,11 +163,12 @@ node scripts\extract-theater-tiles.mjs --game-dir "F:/Red-Alert-2-Yuris-Revenge"
 生成时服务端诊断行（`URBAN:`）：
 
 ```
-URBAN: TEMPERATE 3 区 / 12 条街 / 街格 348 / 建筑 21 (尝试 14 次) 位置 27x24@63,58/4街 26x22@33,80/3街 25x23@81,88/5街
+URBAN: TEMPERATE 3 区 / 24 条街 / 街格 893 / 建筑 18 / 载具 9 / 步兵 21 (尝试 40 次) 位置 32x32@58,72/6街 ...
 ```
 
-全部失败时打印原因计数（`anchor` / `offmap` / `z` / `slope` / `occupied` / `overlay` /
-`unpassable` / `notile` / `startingpoint` / `overlap` / `norooms`）。
+未达目标区数时打印原因计数（`anchor` / `offmap` / `z` / `slope` / `occupied` / `overlay` /
+`unpassable` / `notile` / `startingpoint` / `nearanchor` / `thin` / `overlap` / `norooms` /
+`path` / `emptyarea`）。
 
 探针（`scratch/`，未跟踪）：
 
@@ -185,6 +189,12 @@ node scratch\urban-run.mjs <theater> <seed>       # 端到端生成 + 渲染
   所以同一轮里铺出来的是正交网格，不是一条蜿蜒的曲线街；
 * 每轮 10 轮的上限与引擎一致，10 轮都能落脚；每轮的路径长度在第二轮起按 0.55 折减
   （引擎每轮用的是同一套 `2*w*h/15` 区间，这里为了不让 10 轮把整张图铺满做了折减）；
-* 载具 / 步兵未实现（`.map` 没有 `[Units]` / `[Infantry]` 段）；
+* 载具 / 步兵已实现：`0x5A6920` 对应 `placeCrowd`，载具压在车道格上、步兵贴街边 1..2 格；
+  名单是 Ares 的 `[Urban] Vehicles` / `[Urban] Infantry` 默认值；
+* `.map` 现在会写出 `[Units]` / `[Infantry]` 两段，行格式照成品地图
+  （`hillbtwn.map` 的 `Neutral,CAR,256,47,100,192,Sleep,None,0,-1,0,-1,1,1`、
+  `austintx.map` 的 `Neutral,COW,256,128,42,4,Guard,32,None,0,-1,0,1,1`），
+  字段语义按 CNCMaps `MapFile.readUnits` / `readInfantry` 反推：
+  `owner,name,health,x,y,(步兵: subCell),mission,(步兵: direction),tag,vet,...`；
 * `SNOW` 没有 `Medians`，中央带是原地形；
 * `LUNAR` 没有城区素材（`PavedRoads = -1`），直接跳过。

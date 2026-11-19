@@ -948,6 +948,51 @@ export function saveMapFile(r: Rmg, path: string): boolean {
         text += '\n';
     }
 
+    // [Units] / [Infantry]: the shipped maps' 14-field lines.
+    // Field order (CNCMaps MapFile.readUnits / readInfantry):
+    //   owner,name,health,x,y,(infantry: subCell),mission,(infantry: direction),
+    //   tag,veterancy,group,group,onBridge,...
+    // The house block above is only written when there is something to own,
+    // so these two sections hang off the same condition.
+    const infantryOwner = (s: { houseName: string }): string => (r.config.multiplayer
+        ? neutralOwner
+        : s.houseName
+            ? s.houseName
+            : 'Neutral House');
+
+    if (r.units.length !== 0) {
+        text += '[Units]\n';
+        let line = 0;
+        for (const u of r.units) {
+            if (!u.typeName) continue;
+            text += Int(line++) + '=';
+            text += infantryOwner(u) + ',';
+            text += u.typeName + ',256,';
+            text += Int((u.coords << 16) >> 16) + ',';
+            text += Int((((u.coords >>> 16) & 0xffff) << 16) >> 16) + ',';
+            text += Int(u.facing & 0xff);
+            text += ',Sleep,None,0,-1,0,-1,1,1\n';
+        }
+        text += '\n';
+    }
+
+    if (r.infantry.length !== 0) {
+        text += '[Infantry]\n';
+        let line = 0;
+        for (const i of r.infantry) {
+            if (!i.typeName) continue;
+            text += Int(line++) + '=';
+            text += infantryOwner(i) + ',';
+            text += i.typeName + ',256,';
+            text += Int((i.coords << 16) >> 16) + ',';
+            text += Int((((i.coords >>> 16) & 0xffff) << 16) >> 16) + ',';
+            text += Int(i.subCell & 0x7) + ',Sleep,';
+            text += Int(i.facing & 0xff);
+            text += ',None,0,-1,0,1,1\n';
+        }
+        text += '\n';
+    }
+
     // ---- 6. write the map out ---------------------------------------------
     try {
         // Windows-ANSI INI text: byte-oriented, so latin1 chars -> bytes.

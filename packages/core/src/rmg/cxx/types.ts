@@ -304,6 +304,16 @@ export interface MapTerrainObjectRec {
     typeName: string;
 }
 
+/** [Units] / [Infantry] 的共用记录（House,Type,256,x,y,...） */
+export interface MapObjectRec {
+    coords: number; // packed
+    typeName: string;
+    houseName: string;
+    facing: number;
+    /** 仅 [Infantry]：子格 0..4（StoppingCoordAbs 的四分之一格偏移） */
+    subCell: number;
+}
+
 export interface StartingPointRecord {
     index: number;
     coords: number; // packed

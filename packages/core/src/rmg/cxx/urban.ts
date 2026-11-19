@@ -75,6 +75,10 @@ export interface UrbanAreaStats {
     /** 街道段数（横 + 竖） */
     streets: number;
     structures: number;
+    /** [Units] 里的载具数 */
+    vehicles: number;
+    /** [Infantry] 里的步兵数 */
+    infantry: number;
     attempts: number;
     rejections: Record<string, number>;
     locations: { x: number; y: number; w: number; h: number; streets: number }[];
@@ -197,7 +201,8 @@ function cellOkForRoad(r: Rmg, x: number, y: number, level: number): string | nu
  */
 export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats {
     const stats: UrbanAreaStats = {
-        areas: 0, roadCells: 0, streets: 0, structures: 0, attempts: 0, rejections: {}, locations: [],
+        areas: 0, roadCells: 0, streets: 0, structures: 0, vehicles: 0, infantry: 0,
+        attempts: 0, rejections: {}, locations: [],
     };
     const theater = r.config.theater;
     const theaterName = ['TEMPERATE', 'SNOW', 'URBAN', 'DESERT', 'NEWURBAN', 'LUNAR'][theater] ?? 'TEMPERATE';
@@ -334,6 +339,8 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     const placedBoxes: { x: number; y: number; w: number; h: number }[] = [];
     const rowTaken: number[] = [];
     const colTaken: number[] = [];
+    /** 车道格（给 `0x5A6920` 的载具 / 步兵落脚用），每段隔几格采一个，别把整段都存下来 */
+    const streetCells: { x: number; y: number; level: number; horizontal: boolean }[] = [];
     const nearTaken = (list: number[], v: number): boolean => list.some((n) => Math.abs(n - v) <= 3);
 
     /**
@@ -379,6 +386,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (r.mediansIndex >= 0) {
                 for (let x = x0; x <= x1; x++) stamp(r.mediansIndex, x, y + 1);
             }
+            for (let x = x0; x <= x1; x += 3) streetCells.push({ x, y, level, horizontal: true });
             if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
             if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
             rowTaken.push(y);
@@ -393,6 +401,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (r.mediansIndex >= 0) {
                 for (let y = y0; y <= y1; y++) stamp(r.mediansIndex, x + 1, y);
             }
+            for (let y = y0; y <= y1; y += 3) streetCells.push({ x, y, level, horizontal: false });
             if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
             if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
             colTaken.push(x);
@@ -421,6 +430,69 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 stats.structures++;
                 break;
             }
+        }
+    };
+
+    /**
+     * `0x5A6920`（加减员）：载具压在车道格上，步兵贴在街边的空地上。
+     * 方向按 RA2 的 0..255 编码：横街给 64/192、竖街给 0/128，看起来是顺着街停的。
+     */
+    const crowdTaken = new Set<number>();
+    const placeCrowd = (level: number, from: number, to: number): void => {
+        if (to <= from) return;
+        const cellKey = (x: number, y: number): number => x * 8192 + y;
+
+        const pickStreet = (): { x: number; y: number; horizontal: boolean } | null => {
+            for (let i = 0; i < 24; i++) {
+                const c = streetCells[randRange(from, to - 1)]!;
+                if (c.level !== level) continue;
+                if (crowdTaken.has(cellKey(c.x, c.y))) continue;
+                if (cellOkForRoad(r, c.x, c.y, level) !== null) continue;
+                return c;
+            }
+            return null;
+        };
+
+        const vehicles = randRange(1, 3);
+        for (let n = 0; n < vehicles && ARES_URBAN_VEHICLES.length !== 0; n++) {
+            const c = pickStreet();
+            if (c === null) break;
+            const type = ARES_URBAN_VEHICLES[randRange(0, ARES_URBAN_VEHICLES.length - 1)]!;
+            const facing = c.horizontal
+                ? (r.rng.unit() < 0.5 ? 64 : 192)
+                : (r.rng.unit() < 0.5 ? 0 : 128);
+            r.units.push({
+                coords: packXY(i16(c.x), i16(c.y)),
+                typeName: type,
+                houseName: '',
+                facing,
+                subCell: 0,
+            });
+            crowdTaken.add(cellKey(c.x, c.y));
+            stats.vehicles++;
+        }
+
+        const infantry = randRange(4, 10);
+        for (let n = 0; n < infantry && ARES_URBAN_INFANTRY.length !== 0; n++) {
+            const c = pickStreet();
+            if (c === null) break;
+            // 贴街边：横街往上下放、竖街往左右放，1..2 格
+            const side = r.rng.unit() < 0.5 ? -1 : 1;
+            const off = randRange(1, 2);
+            const px = c.horizontal ? c.x : c.x + side * off;
+            const py = c.horizontal ? c.y + side * off : c.y;
+            if (cellOkForRoad(r, px, py, level) !== null) continue;
+            if (crowdTaken.has(cellKey(px, py))) continue;
+            const type = ARES_URBAN_INFANTRY[randRange(0, ARES_URBAN_INFANTRY.length - 1)]!;
+            r.infantry.push({
+                coords: packXY(i16(px), i16(py)),
+                typeName: type,
+                houseName: '',
+                facing: randRange(0, 255),
+                subCell: randRange(0, 4),
+            });
+            crowdTaken.add(cellKey(px, py));
+            stats.infantry++;
         }
     };
 
@@ -454,6 +526,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         let centerY = -1;
         let centerLevel = 0;
         const areaStart = placedBoxes.length;   // 本城区之前的盒子（跨城区间距只跟它们比）
+        const cellStart = streetCells.length;   // 本城区的车道格起点（加减员只在这段里挑）
 
         for (let round = 0; round < ROUNDS_PER_AREA && boxes < BOXES_PER_AREA; round++) {
             stats.attempts++;
@@ -547,12 +620,15 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             reject('emptyarea');
             continue;
         }
+        // 0x5A6920 每个城区收尾跑一次（不是每块包围盒一次）
+        placeCrowd(centerLevel, cellStart, streetCells.length);
         stats.areas++;
     }
 
     diag(
         `URBAN: ${theaterName} ${stats.areas} 区 / ${stats.streets} 条街 / 街格 ${stats.roadCells}`
-        + ` / 建筑 ${stats.structures} (尝试 ${stats.attempts} 次)`
+        + ` / 建筑 ${stats.structures} / 载具 ${stats.vehicles} / 步兵 ${stats.infantry}`
+        + ` (尝试 ${stats.attempts} 次)`
         + (stats.areas < options.areas ? ` 失败原因 ${JSON.stringify(stats.rejections)}` : '')
         + (stats.locations.length !== 0
             ? ' 位置 ' + stats.locations.map((l) => `${l.w}x${l.h}@${l.x},${l.y}/${l.streets}街`).join(' ')

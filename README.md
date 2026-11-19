@@ -117,7 +117,7 @@ packages/
 - 可配置地图尺寸、玩家数量、游戏模式
 - 建筑损坏/摧毁设置
 - 污迹密度控制
-- 城区生成（对齐 Ares 的 Create Urban Areas，挂在**原版 RMG 管线**）：`POST /api/rmg/cxx/generate` 传 `urbanAreas: true`（或数字=城区数量），按 gamemd `0x5A5020` 的顺序每区跑最多 10 轮「长路径（`0x5A5360`）→ 取包围盒 → 10 格步进铺**街道栅格**（`Proad` 多格图块逐子格盖章 + 中隔 + 两端 `p_end` 端头）」→ 街区里放城区建筑；规则见 [`re/specs/URBAN_AREAS.md`](re/specs/URBAN_AREAS.md)
+- 城区生成（对齐 Ares 的 Create Urban Areas，挂在**原版 RMG 管线**）：`POST /api/rmg/cxx/generate` 传 `urbanAreas: true`（或数字=城区数量），按 gamemd `0x5A5020` 的顺序每区跑最多 10 轮「长路径（`0x5A5360`）→ 取包围盒 → 10 格步进铺**街道栅格**（`Proad` 多格图块逐子格盖章 + 中隔 + 两端 `p_end` 端头）」→ 街区里放城区建筑 → 车道上放载具、街边放步兵（写出 `[Units]` / `[Infantry]`）；规则见 [`re/specs/URBAN_AREAS.md`](re/specs/URBAN_AREAS.md)
 - 自动生成缩略图预览
 - 完全随机模式 / 手动配置模式
 
