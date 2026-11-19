@@ -146,9 +146,9 @@ export function generateMap(
     if (params.urbanAreas) {
         const areas = typeof params.urbanAreas === 'number'
             ? Math.max(0, Math.trunc(params.urbanAreas))
-            : Math.max(2, Math.min(10, Math.round((rmg.size.mapWidth * rmg.size.mapHeight) / 1200)));
-        // 盒子放大到 40..52：10 格栅格才能出 4~5 横 + 4~5 竖，街道成网
-        addUrbanAreas(rmg, { areas, sizeRange: [40, 52] });
+            : Math.max(2, Math.min(6, Math.round((rmg.size.mapWidth * rmg.size.mapHeight) / 2000)));
+        // 3 片大城 + 保留荒野；盒子 38..46 能让 10 格栅格出 3~4 横 + 3~4 竖
+        addUrbanAreas(rmg, { areas, sizeRange: [38, 46] });
     }
     scanMaxLevel('after-urban');
     recalculateCellAttributes(rmg); // 0x59912A

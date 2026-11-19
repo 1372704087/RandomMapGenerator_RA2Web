@@ -236,6 +236,8 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     /** 已铺过街的格子（建筑不能压上去；引擎查的是格子本身清不清，不是「离街几格」） */
     const roadSet = new Set<number>();
     const cellKey = (x: number, y: number): number => x * 8192 + y;
+    /** 已落建筑占的格子：楼与楼之间要留 1 格，否则贴图叠在一起成一坨 */
+    const buildingSet = new Set<number>();
 
     const stamp = (tile: number, x: number, y: number): void => {
         // 已盖过楼的格子上不要铺路（否则渲染成「楼被路穿过」）
@@ -363,6 +365,8 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      * 返回铺出的街段数。
      */
     const placeRoadGrid = (bx: number, by: number, bw: number, bh: number, level: number): number => {
+        // `Proad01` = 1x3（横街，占 3 行）、`Proad02` = 3x1（竖街，占 3 列）。
+        // 反过来试过（URBAN_SWAP），渲染只剩一条虚线边，说明现在这对是对的。
         const laneEW = r.pavedRoadsIndex;
         const laneNS = r.pavedRoadsIndex + 1;
         const ends = r.pavedRoadEndsIndex;
@@ -532,11 +536,25 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                     }
                 }
                 if (onRoad) continue;
+                // 与已放的楼之间留 1 格（否则高楼贴图互相压住，看上去是一整坨）
+                let crowded = false;
+                for (let dy = -1; dy <= type.height && !crowded; dy++) {
+                    for (let dx = -1; dx <= type.width; dx++) {
+                        if (buildingSet.has(cellKey(px + dx, py + dy))) {
+                            crowded = true;
+                            break;
+                        }
+                    }
+                }
+                if (crowded) continue;
                 const base = packXY(i16(px), i16(py));
                 // 引擎的 `TileRectClear` 只查建筑底座覆盖的那几格，不查外圈
                 // （外圈是 `PlaceStructure` 自己的事，城里墙贴墙很正常）
                 if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) continue;
                 recordPlacedBuilding(r, base, type.name, type.width, type.height);
+                for (let dy = 0; dy < type.height; dy++) {
+                    for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
+                }
                 stats.structures++;
                 break;
             }
@@ -632,7 +650,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             const baseLen = (2 * cols * rows) / 15;
             const scale = round === 0 ? 1.0 : 0.55;
             const length = Math.round(scale * randRange(
-                Math.max(100, baseLen * 1.4), Math.min(2000, baseLen * 2.4)));
+                Math.max(100, baseLen * 1.1), Math.min(2000, baseLen * 1.9)));
 
             // 首轮：全图随便挑一个空位当城区中心；后续轮：围着这个中心找锚点
             let ax: number;
