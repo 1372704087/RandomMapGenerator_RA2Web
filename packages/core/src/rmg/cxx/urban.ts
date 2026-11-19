@@ -216,7 +216,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     };
 
     const [sizeMin, sizeMax] = options.sizeRange ?? [22, 32];
-    const [stMin, stMax] = options.structuresPerArea ?? [4, 10];
+    const [stMin, stMax] = options.structuresPerArea ?? [6, 14];
     const safeRadius = options.startingPointRadius ?? 10;
 
     const randRange = (lo: number, hi: number): number => r.rng.randomRanged(lo, hi);
@@ -330,7 +330,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         return path;
     };
 
-    const maxAttempts = Math.max(60, options.areas * 80);
+    const maxAttempts = Math.max(80, options.areas * 200);
     const placedBoxes: { x: number; y: number; w: number; h: number }[] = [];
     const rowTaken: number[] = [];
     const colTaken: number[] = [];
@@ -410,7 +410,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             const maxX = bx + bw - type.width - 2;
             const maxY = by + bh - type.height - 2;
             if (maxX < bx + 2 || maxY < by + 2) return;
-            for (let tries = 0; tries < 12; tries++) {
+            for (let tries = 0; tries < 24; tries++) {
                 const px = randRange(bx + 2, maxX);
                 const py = randRange(by + 2, maxY);
                 if (rowTaken.some((ry) => Math.abs(py - ry) < 4)) continue;
@@ -430,17 +430,20 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      * （同一城区的街可以咬合），只有跨城区时才强制留 3 格空隙。
      */
     const ROUNDS_PER_AREA = 10;
-    const BOXES_PER_AREA = 3;
+    const BOXES_PER_AREA = ROUNDS_PER_AREA;   // 引擎的 10 轮都能落脚，没有「最多几块」的上限
 
-    /** 在中心附近取一个可铺路的点 */
+    /** 在中心附近取一个可铺路的点（先按给定半径，找不到就逐级放宽） */
     const randomNear = (cx: number, cy: number, radius: number, level: number): [number, number] | null => {
-        for (let i = 0; i < 16; i++) {
-            const x = cx + randRange(-radius, radius);
-            const y = cy + randRange(-radius, radius);
-            if (!r.cellExists(x, y)) continue;
-            if (r.cellAt(x, y).level !== level) continue;
-            if (cellOkForRoad(r, x, y, level) !== null) continue;
-            return [x, y];
+        for (const factor of [1, 1.6, 2.4]) {
+            const rad = Math.max(3, Math.round(radius * factor));
+            for (let i = 0; i < 16; i++) {
+                const x = cx + randRange(-rad, rad);
+                const y = cy + randRange(-rad, rad);
+                if (!r.cellExists(x, y)) continue;
+                if (r.cellAt(x, y).level !== level) continue;
+                if (cellOkForRoad(r, x, y, level) !== null) continue;
+                return [x, y];
+            }
         }
         return null;
     };
@@ -450,6 +453,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         let centerX = -1;
         let centerY = -1;
         let centerLevel = 0;
+        const areaStart = placedBoxes.length;   // 本城区之前的盒子（跨城区间距只跟它们比）
 
         for (let round = 0; round < ROUNDS_PER_AREA && boxes < BOXES_PER_AREA; round++) {
             stats.attempts++;
@@ -481,11 +485,6 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 }
                 if (nearStart(ax, ay)) {
                     reject('startingpoint');
-                    continue;
-                }
-                if (placedBoxes.some((b) => !(ax + span + 3 < b.x || ax > b.x + b.w + 3
-                    || ay + span + 3 < b.y || ay > b.y + b.h + 3))) {
-                    reject('overlap');
                     continue;
                 }
                 centerX = ax;
@@ -525,6 +524,13 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 reject('thin');
                 continue;
             }
+            // 跨城区留 3 格空隙：只跟本城区之前的盒子比（同城区的盒子允许咬合）
+            if (round === 0 && placedBoxes.slice(0, areaStart).some((b) => !(
+                bx + bw + 3 < b.x || bx > b.x + b.w + 3
+                || by + bh + 3 < b.y || by > b.y + b.h + 3))) {
+                reject('overlap');
+                continue;
+            }
 
             const streets = placeRoadGrid(bx, by, bw, bh, level);
             stats.streets += streets;
@@ -547,7 +553,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     diag(
         `URBAN: ${theaterName} ${stats.areas} 区 / ${stats.streets} 条街 / 街格 ${stats.roadCells}`
         + ` / 建筑 ${stats.structures} (尝试 ${stats.attempts} 次)`
-        + (stats.areas === 0 ? ` 失败原因 ${JSON.stringify(stats.rejections)}` : '')
+        + (stats.areas < options.areas ? ` 失败原因 ${JSON.stringify(stats.rejections)}` : '')
         + (stats.locations.length !== 0
             ? ' 位置 ' + stats.locations.map((l) => `${l.w}x${l.h}@${l.x},${l.y}/${l.streets}街`).join(' ')
             : ''),
