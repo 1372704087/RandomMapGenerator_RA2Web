@@ -342,8 +342,6 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
 
     const maxAttempts = Math.max(80, options.areas * 200);
     const placedBoxes: { x: number; y: number; w: number; h: number }[] = [];
-    const rowTaken: number[] = [];
-    const colTaken: number[] = [];
     const nearTaken = (list: number[], v: number): boolean => list.some((n) => Math.abs(n - v) <= 3);
 
     /**
@@ -355,7 +353,27 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         const laneEW = r.pavedRoadsIndex;
         const laneNS = r.pavedRoadsIndex + 1;
         const ends = r.pavedRoadEndsIndex;
-        const ok = (x: number, y: number): boolean => cellOkForRoad(r, x, y, level) === null;
+
+        // 可铺性快照：在盖章之前把整片街区问一遍。
+        // 不能边铺边问 —— 横街盖完之后那一行已经「不是空地」，
+        // 竖街再问就会在交叉口处被切碎，街区永远合不拢（没有交叉路口）。
+        const em = 2;
+        const gx0 = bx - em;
+        const gy0 = by - em;
+        const gw = bw + em * 2;
+        const gh = bh + em * 2;
+        const good = new Uint8Array(gw * gh);
+        for (let y = 0; y < gh; y++) {
+            for (let x = 0; x < gw; x++) {
+                good[y * gw + x] = cellOkForRoad(r, gx0 + x, gy0 + y, level) === null ? 1 : 0;
+            }
+        }
+        const ok = (x: number, y: number): boolean => {
+            const ix = x - gx0;
+            const iy = y - gy0;
+            if (ix < 0 || iy < 0 || ix >= gw || iy >= gh) return false;
+            return good[iy * gw + ix] === 1;
+        };
 
         const longestRun = (from: number, to: number, fixed: number, horizontal: boolean): [number, number] | null => {
             let bestStart = -1;
@@ -378,6 +396,11 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             }
             return bestLen >= 7 ? [bestStart, bestStart + bestLen - 1] : null;
         };
+
+        // 行/列去重只在本片街区内部有意义：跨城区共用一个列表会把
+        // 相隔很远的另一片城区的 10 格栅格也当成「太近」而整列跳过。
+        const rowTaken: number[] = [];
+        const colTaken: number[] = [];
 
         let streets = 0;
         for (let y = by + FIRST_ROW_OFFSET; y <= by + bh - 3; y += ROAD_SPACING) {
@@ -494,7 +517,9 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 }
                 if (onRoad) continue;
                 const base = packXY(i16(px), i16(py));
-                if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 1)) continue;
+                // 引擎的 `TileRectClear` 只查建筑底座覆盖的那几格，不查外圈
+                // （外圈是 `PlaceStructure` 自己的事，城里墙贴墙很正常）
+                if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) continue;
                 recordPlacedBuilding(r, base, type.name, type.width, type.height);
                 stats.structures++;
                 break;
@@ -653,6 +678,45 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 reject('thin');
                 continue;
             }
+            // 街区要能整片铺开：引擎对每一段街都跑矩形「清不清」的判定
+            // （`sub_5A7250`），一片被矿/树/水切碎的包围盒铺出来的街必然是断的，
+            // 所以在落盒之前先看干净格子占比。
+            let clean = 0;
+            let total = 0;
+            for (let y = by; y < by + bh; y += 2) {
+                for (let x = bx; x < bx + bw; x += 2) {
+                    total++;
+                    if (cellOkForRoad(r, x, y, level) === null) clean++;
+                }
+            }
+            if (total > 0 && clean / total < 0.65) {
+                reject('dirty');
+                continue;
+            }
+            // 还得有地方放楼：至少要有几处 3x3 的空地（引擎的城是街道 + 沿街建筑，
+            // 一片连 3x3 都找不到的沙地铺出来就是「沙漠高速」）
+            let spots = 0;
+            for (let y = by; y + 3 <= by + bh && spots < 3; y++) {
+                for (let x = bx; x + 3 <= bx + bw; x++) {
+                    let all = true;
+                    for (let dy = 0; dy < 3 && all; dy++) {
+                        for (let dx = 0; dx < 3; dx++) {
+                            if (cellOkForRoad(r, x + dx, y + dy, level) !== null) {
+                                all = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (all) {
+                        spots++;
+                        if (spots >= 3) break;
+                    }
+                }
+            }
+            if (spots < 3) {
+                reject('nobuild');
+                continue;
+            }
             // 跨城区留 3 格空隙：只跟本城区之前的盒子比（同城区的盒子允许咬合）
             if (round === 0 && placedBoxes.slice(0, areaStart).some((b) => !(
                 bx + bw + 3 < b.x || bx > b.x + b.w + 3
@@ -682,6 +746,13 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         stats.areas++;
     }
 
+    if (process.env.RMG_DEBUG_URBAN) {
+        // eslint-disable-next-line no-console
+        console.log(`URBAN: ${theaterName} ${stats.areas} 区 / ${stats.streets} 街 / 建筑 ${stats.structures}`
+            + ` / 载具 ${stats.vehicles} / 步兵 ${stats.infantry} 位置 `
+            + stats.locations.map((l) => `${l.w}x${l.h}@${l.x},${l.y}`).join(' ')
+            + ` 失败 ${JSON.stringify(stats.rejections)}`);
+    }
     diag(
         `URBAN: ${theaterName} ${stats.areas} 区 / ${stats.streets} 条街 / 街格 ${stats.roadCells}`
         + ` / 建筑 ${stats.structures} / 载具 ${stats.vehicles} / 步兵 ${stats.infantry}`
