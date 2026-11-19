@@ -437,15 +437,21 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         let streets = 0;
         const rowsPlaced: number[] = [];
         const colsPlaced: number[] = [];
-        // 小块城区只给一横一竖（十字路口）：切片管线在 77x85 上实测是
-        // 「25 个地标均匀散布、最近邻中位 6.7 格」，不是整片街道网。
-        const laneCap = Math.max(1, Math.floor(bw / 26));
-        for (let y = by + FIRST_ROW_OFFSET; y <= by + bh - 3; y += ROAD_SPACING) {
-            if (rowsPlaced.length >= laneCap) break;
+        // 用户口径：路要「零星几条」，所以每片城区只落一条街（随机横或竖），
+        // 而且长度封顶，不铺满盒子宽度 —— 楼才是主角。
+        const horizontal = r.rng.unit() < 0.5;
+        const maxLen = 12;
+        for (let y = by + FIRST_ROW_OFFSET; horizontal && y <= by + bh - 3; y += ROAD_SPACING) {
+            if (rowsPlaced.length >= 1) break;
             if (nearTaken(rowTaken, y)) continue;               // 与已有街相距 <= 3 会出碎路
             const run = longestRun(bx, bx + bw - 1, y, true);
             if (run === null) continue;
-            const [x0, x1] = run;
+            let [x0, x1] = run;
+            if (x1 - x0 + 1 > maxLen) {
+                const mid = Math.floor((x0 + x1) / 2);
+                x0 = Math.max(x0, mid - Math.floor(maxLen / 2));
+                x1 = Math.min(x1, x0 + maxLen - 1);
+            }
             for (let x = x0; x <= x1; x++) stampRoad(x, y, true);   // 每格一次，图块自带 1x3 画幅
             if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
             if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
@@ -453,12 +459,17 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             rowsPlaced.push(y);
             streets++;
         }
-        for (let x = bx + FIRST_COL_OFFSET; x <= bx + bw - 5; x += ROAD_SPACING) {
-            if (colsPlaced.length >= laneCap) break;
+        for (let x = bx + FIRST_COL_OFFSET; !horizontal && x <= bx + bw - 5; x += ROAD_SPACING) {
+            if (colsPlaced.length >= 1) break;
             if (nearTaken(colTaken, x)) continue;
             const run = longestRun(by, by + bh - 1, x, false);
             if (run === null) continue;
-            const [y0, y1] = run;
+            let [y0, y1] = run;
+            if (y1 - y0 + 1 > maxLen) {
+                const mid = Math.floor((y0 + y1) / 2);
+                y0 = Math.max(y0, mid - Math.floor(maxLen / 2));
+                y1 = Math.min(y1, y0 + maxLen - 1);
+            }
             for (let y = y0; y <= y1; y++) stampRoad(x, y, false);   // 同上，图块自带 3x1 画幅
             if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
             if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
@@ -500,9 +511,36 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      * 再 `v6 = v5 >> 1` 作为要成功放下的目标 —— 也就是 `[cells/40, cells/20]`，
      * 最后被名单长度封顶（Ares 默认 13 条结构）。
      */
-    const placeStructures = (blocks: Box[], level: number): void => {
-        if (catalog.length === 0 || blocks.length === 0) return;
-        // 每块街区放 1~2 栋：先把街区打散，按序填，楼自然沿街排开
+    const placeStructures = (blocks: Box[], boxes: Box[], level: number): void => {
+        if (catalog.length === 0 || boxes.length === 0) return;
+
+        /** 落一栋：底座外一圈不能压街、也不能贴已有楼（高楼贴图会互相压住） */
+        const tryPlace = (px: number, py: number, type: { name: string; width: number; height: number }): boolean => {
+            if (!r.cellExists(px, py)) return false;
+            if (px < 0 || py < 0 || px + type.width > r.size.mapWidth || py + type.height > r.size.mapHeight) {
+                return false;
+            }
+            for (let dy = -1; dy <= type.height; dy++) {
+                for (let dx = -1; dx <= type.width; dx++) {
+                    const k = cellKey(px + dx, py + dy);
+                    if (roadSet.has(k) || buildingSet.has(k)) return false;
+                }
+            }
+            const base = packXY(i16(px), i16(py));
+            if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) return false;
+            recordPlacedBuilding(r, base, type.name, type.width, type.height);
+            for (let dy = 0; dy < type.height; dy++) {
+                for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
+            }
+            stats.structures++;
+            return true;
+        };
+
+        // 每片城区想放 8..12 栋（用户要求楼多、路少）
+        const target = randRange(8, 12);
+        let placed = 0;
+
+        // 第一轮：按街区填，每块 3 栋，先散开街区顺序
         const order = blocks.slice();
         for (let i = order.length - 1; i > 0; i--) {
             const j = randRange(0, i);
@@ -510,25 +548,28 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             order[i] = order[j]!;
             order[j] = t;
         }
-        const perBlock = randRange(2, 3);
         for (const b of order) {
-            for (let k = 0; k < perBlock; k++) {
+            for (let k = 0; k < 3 && placed < target; k++) {
                 const type = catalog[randRange(0, catalog.length - 1)]!;
-                for (let tries = 0; tries < 12; tries++) {
-                    // 街区内部居中取点，外留 1 格
-                    const px = b.x + Math.floor((b.w - type.width) / 2)
-                        + (tries === 0 ? 0 : randRange(-1, 1));
-                    const py = b.y + Math.floor((b.h - type.height) / 2)
-                        + (tries === 0 ? 0 : randRange(-1, 1));
-                    if (px <= b.x || py <= b.y) continue;
-                    if (px + type.width >= b.x + b.w || py + type.height >= b.y + b.h) continue;
-                    const base = packXY(i16(px), i16(py));
-                    if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) continue;
-                    recordPlacedBuilding(r, base, type.name, type.width, type.height);
-                    for (let dy = 0; dy < type.height; dy++) {
-                        for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
+                for (let tries = 0; tries < 16; tries++) {
+                    const px = b.x + Math.floor((b.w - type.width) / 2) + randRange(-1, 1);
+                    const py = b.y + Math.floor((b.h - type.height) / 2) + randRange(-1, 1);
+                    if (tryPlace(px, py, type)) {
+                        placed++;
+                        break;
                     }
-                    stats.structures++;
+                }
+            }
+        }
+        // 第二轮：还差就在城区里随机补（街区太小放不下时兜底）
+        for (let n = placed; n < target; n++) {
+            const type = catalog[randRange(0, catalog.length - 1)]!;
+            for (let tries = 0; tries < 40; tries++) {
+                const b = boxes[randRange(0, boxes.length - 1)]!;
+                const px = randRange(b.x + 1, b.x + b.w - 1 - type.width);
+                const py = randRange(b.y + 1, b.y + b.h - 1 - type.height);
+                if (tryPlace(px, py, type)) {
+                    placed++;
                     break;
                 }
             }
@@ -751,7 +792,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             continue;
         }
         // 0x5A6510 / 0x5A6920 都是每个城区收尾各跑一次（不是每块包围盒一次）
-        placeStructures(areaBlocks, centerLevel);
+        placeStructures(areaBlocks, areaBoxes, centerLevel);
         placeCrowd(areaBoxes, centerLevel);
         stats.areas++;
     }
