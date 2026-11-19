@@ -238,8 +238,21 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     const cellKey = (x: number, y: number): number => x * 8192 + y;
 
     const stamp = (tile: number, x: number, y: number): void => {
+        // 已盖过楼的格子上不要铺路（否则渲染成「楼被路穿过」）
+        const c = r.cellExists(x, y) ? r.cellAt(x, y) : null;
+        if (c !== null && (c.altFlags & ALT_CONTAINS_BUILDING) !== 0) {
+            stats.rejections['roadOnBuilding'] = (stats.rejections['roadOnBuilding'] ?? 0) + 1;
+            return;
+        }
         placeWaterDetailTile(r, tile, packXY(i16(x), i16(y)), -1, -1);
-        roadSet.add(cellKey(x, y));
+        // 图块是 1x3 / 3x1 的多格画幅：`placeWaterDetailTile` 会把子格写到
+        // (x+col, y+row)。只记锚点的话，楼会盖在街道的第 2/3 行上（看起来就在路里）。
+        const fp = r.tileFootprintOverrides.get(tile);
+        const w = fp?.w ?? 1;
+        const h = fp?.h ?? 1;
+        for (let row = 0; row < h; row++) {
+            for (let col = 0; col < w; col++) roadSet.add(cellKey(x + col, y + row));
+        }
         stats.roadCells++;
     };
 
@@ -448,13 +461,6 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      */
     const placeStructures = (boxes: Box[], level: number): void => {
         if (catalog.length === 0 || boxes.length === 0) return;
-        const names = catalog.slice();
-        for (let i = names.length - 1; i > 0; i--) {
-            const j = randRange(0, i);
-            const t = names[i]!;
-            names[i] = names[j]!;
-            names[j] = t;
-        }
         // 城区格子数（包围盒并集；重叠的盒子只算一次）
         const cellSet = new Set<number>();
         for (const b of boxes) {
@@ -466,32 +472,42 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         const v2 = Math.max(1, Math.floor(cells / 10));   // 引擎 a1+16 的 cells/10
         const v3 = Math.max(1, Math.floor(cells / 20));   // cells/20
         const v5 = randRange(v3, Math.max(v3, v2));
-        const count = Math.min(names.length, Math.max(1, v5 >> 1));
+        // 名单允许重复：引擎每区被 13 条名单封顶，城区就只有一条街的楼；
+        // 想铺满街区就得放开这个上限（属于明确的偏离，不是原版行为）。
+        const count = Math.min(60, Math.max(1, v5 >> 1));
 
         // 先算出「贴着街的空地」：城区里非街面、且四邻里有一格是街的格子。
-        // 引擎是从城区格子里随机取的，随机取在 32x32 的盒子里会堆成一小团；
-        // 按「面朝街道的空地」优先铺，街区才会沿街排开。
+        // 引擎是从城区格子里随机取的；这里改成「离街 1 格」的空地：
+        // 建筑底座要紧贴街道的话，高楼贴图会向上/向两侧伸出底座，
+        // 渲染出来就像楼长在路面上（RA2 的楼是 1~3 格底座 + 大贴图）。
         const frontage: number[] = [];
         const frontSet = new Set<number>();
+        const anyRoadAround = (x: number, y: number, r0: number, r1: number): boolean => {
+            for (let dy = -r1; dy <= r1; dy++) {
+                for (let dx = -r1; dx <= r1; dx++) {
+                    const d = Math.max(Math.abs(dx), Math.abs(dy));
+                    if (d < r0 || d > r1) continue;
+                    if (roadSet.has(cellKey(x + dx, y + dy))) return true;
+                }
+            }
+            return false;
+        };
         for (const b of boxes) {
             for (let y = b.y; y < b.y + b.h; y++) {
                 for (let x = b.x; x < b.x + b.w; x++) {
                     const k = cellKey(x, y);
                     if (roadSet.has(k) || frontSet.has(k)) continue;
                     if (crowdTaken.has(k)) continue;
-                    const touches =
-                        roadSet.has(cellKey(x + 1, y)) || roadSet.has(cellKey(x - 1, y)) ||
-                        roadSet.has(cellKey(x, y + 1)) || roadSet.has(cellKey(x, y - 1));
-                    if (touches) {
-                        frontSet.add(k);
-                        frontage.push(k);
-                    }
+                    if (anyRoadAround(x, y, 1, 1)) continue;       // 紧贴街的不要
+                    if (!anyRoadAround(x, y, 2, 3)) continue;       // 要离街 2~3 格（正对街面）
+                    frontSet.add(k);
+                    frontage.push(k);
                 }
             }
         }
 
         for (let n = 0; n < count; n++) {
-            const type = names[n]!;
+            const type = catalog[randRange(0, catalog.length - 1)]!;
             for (let tries = 0; tries < 60; tries++) {
                 // 前 40 次按街面空地取点，后 20 次退化为盒子里随机取
                 const cell = tries < 40 && frontage.length > 0
@@ -505,10 +521,10 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 const maxX = px + type.width;
                 const maxY = py + type.height;
                 if (maxX > cols || maxY > rows) continue;
-                // 建筑不能压到街上（引擎查格子本身，不查「离街几格」）
+                // 底座覆盖格连同它外一圈都不能是街面（贴图会伸出底座）
                 let onRoad = false;
-                for (let dy = 0; dy < type.height && !onRoad; dy++) {
-                    for (let dx = 0; dx < type.width; dx++) {
+                for (let dy = -1; dy <= type.height && !onRoad; dy++) {
+                    for (let dx = -1; dx <= type.width; dx++) {
                         if (roadSet.has(cellKey(px + dx, py + dy))) {
                             onRoad = true;
                             break;
@@ -616,7 +632,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             const baseLen = (2 * cols * rows) / 15;
             const scale = round === 0 ? 1.0 : 0.55;
             const length = Math.round(scale * randRange(
-                Math.max(100, baseLen * 0.5), Math.min(2000, baseLen)));
+                Math.max(100, baseLen * 1.4), Math.min(2000, baseLen * 2.4)));
 
             // 首轮：全图随便挑一个空位当城区中心；后续轮：围着这个中心找锚点
             let ax: number;
