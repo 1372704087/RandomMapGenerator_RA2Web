@@ -424,6 +424,10 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     /**
      * `PlaceUrbanStructures`（`0x5A6510`）：名单随机取一条、用掉就删，
      * 所以一个名字在同一城区最多出现一次；每条最多试 60 格。
+     *
+     * 数量取自引擎：`v2 = cells/10`、`v3 = cells/20`，在 `[v3, v2]` 里取 v5，
+     * 再 `v6 = v5 >> 1` 作为要成功放下的目标 —— 也就是 `[cells/40, cells/20]`，
+     * 最后被名单长度封顶（Ares 默认 13 条结构）。
      */
     const placeStructures = (boxes: Box[], level: number): void => {
         if (catalog.length === 0 || boxes.length === 0) return;
@@ -434,10 +438,20 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             names[i] = names[j]!;
             names[j] = t;
         }
-        const count = Math.min(names.length, randRange(stMin, stMax));
+        // 城区格子数（包围盒并集；重叠的盒子只算一次）
+        const cellSet = new Set<number>();
+        for (const b of boxes) {
+            for (let y = b.y; y < b.y + b.h; y++) {
+                for (let x = b.x; x < b.x + b.w; x++) cellSet.add(cellKey(x, y));
+            }
+        }
+        const cells = cellSet.size;
+        const v2 = Math.max(1, Math.floor(cells / 10));   // 引擎 a1+16 的 cells/10
+        const v3 = Math.max(1, Math.floor(cells / 20));   // cells/20
+        const v5 = randRange(v3, Math.max(v3, v2));
+        const count = Math.min(names.length, Math.max(1, v5 >> 1));
         for (let n = 0; n < count; n++) {
-            const type = catalog.length === 0 ? null : names[n]!;
-            if (type === null) return;
+            const type = names[n]!;
             for (let tries = 0; tries < 60; tries++) {
                 const cell = pickCellIn(boxes);
                 if (cell === null) return;
