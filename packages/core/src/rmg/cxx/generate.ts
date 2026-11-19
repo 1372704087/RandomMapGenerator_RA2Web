@@ -146,9 +146,12 @@ export function generateMap(
     if (params.urbanAreas) {
         const areas = typeof params.urbanAreas === 'number'
             ? Math.max(0, Math.trunc(params.urbanAreas))
-            : Math.max(2, Math.min(6, Math.round((rmg.size.mapWidth * rmg.size.mapHeight) / 2000)));
-        // 3 片大城 + 保留荒野；盒子 38..46 能让 10 格栅格出 3~4 横 + 3~4 竖
-        addUrbanAreas(rmg, { areas, sizeRange: [38, 46] });
+            : Math.max(3, Math.min(6, Math.round((rmg.size.mapWidth * rmg.size.mapHeight) / 1200)));
+        // 切片管线（WorkingMap 的 15x15 单元）在 77x85 上实测撒了 25 个地标、
+        // 36 个单元里 21 个带建筑、最近邻中位数 6.7 格 —— 它是「均匀散布小块」，
+        // 不是一片大网格。城区跟着这个口径走：5 个小街坊散开，盒子 18..24，
+        // 每块只落一横一竖两条街（十字），街区里再放楼。
+        addUrbanAreas(rmg, { areas, sizeRange: [18, 24] });
     }
     scanMaxLevel('after-urban');
     recalculateCellAttributes(rmg); // 0x59912A

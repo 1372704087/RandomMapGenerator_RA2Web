@@ -202,3 +202,28 @@ node scratch\urban-run.mjs <theater> <seed>       # 端到端生成 + 渲染
   `owner,name,health,x,y,(步兵: subCell),mission,(步兵: direction),tag,vet,...`；
 * `SNOW` 没有 `Medians`，中央带是原地形；
 * `LUNAR` 没有城区素材（`PavedRoads = -1`），直接跳过。
+
+
+## 切片管线的分布口径（2026-11-19 实测）
+
+拿切片管线（`WorkingMap` 的 15×15 单元 + 地标素材）在同一尺寸上跑一张作对照，
+用 `scratch/slice-dist.mjs` 统计 `[Structures]` 的空间分布：
+
+| 指标 | 切片管线（TEMPERATE 77×85） | Ares 城区（当前口径） |
+| --- | --- | --- |
+| 建筑数 | 25 | 24 |
+| 一个建筑覆盖的面积 | 262 格 | 273 格 |
+| 最近邻距离（iso 中位 / P90） | 6.7 / 15.0 格 | — |
+| 单元占用 | 6×6 个 15×15 单元里 21 个带建筑 | 5 个 24×24 小街坊 |
+| 建筑类型数 | 9（CAPOWR/CABUNK02/CAMACH/CASLAB/CAOILD/CATHOSP/CAAIRP/CAFRMA） | Ares 名单 13 条 |
+
+结论：切片管线并不是「划一片大城」，而是**在整张图上均匀撒 15×15 地标**，
+每个单元最多一个建筑、彼此离散。所以城区参数按它对齐：
+
+* 片区数 `round(w*h/1200)` 夹 3..6（77×85 → 5）；
+* 盒子 `18..24`，`laneCap = floor(bw/26)` → 每片只落一横一竖两条街（一个十字）；
+* 街区里每块放 2..3 栋，实测 TEMPERATE 5 区 / 10 街 / 24 栋，SNOW 5 区 / 10 街 / 26 栋。
+
+贴图方面也做了对照：把街面换成 `MiscPaveTile` 铺纯路面（`URBAN_PAVE=1` 试验开关，已删），
+渲染出来只剩一条浅色土带，反而更不像街 —— 说明 `PavedRoads`（Proad01/02 的 1×3 / 3×1
+深灰沥青 + 白虚线）本来就是红警温带城市的街面，观感偏「铁轨」是整图缩小时的缩小失真假象。

@@ -371,6 +371,9 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         // 反过来试过（URBAN_SWAP），渲染只剩一条虚线边，说明现在这对是对的。
         const laneEW = r.pavedRoadsIndex;
         const laneNS = r.pavedRoadsIndex + 1;
+        const stampRoad = (x: number, y: number, horizontal: boolean): void => {
+            stamp(horizontal ? laneEW : laneNS, x, y);
+        };
         const ends = r.pavedRoadEndsIndex;
 
         // 可铺性快照：在盖章之前把整片街区问一遍。
@@ -434,12 +437,16 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         let streets = 0;
         const rowsPlaced: number[] = [];
         const colsPlaced: number[] = [];
+        // 小块城区只给一横一竖（十字路口）：切片管线在 77x85 上实测是
+        // 「25 个地标均匀散布、最近邻中位 6.7 格」，不是整片街道网。
+        const laneCap = Math.max(1, Math.floor(bw / 26));
         for (let y = by + FIRST_ROW_OFFSET; y <= by + bh - 3; y += ROAD_SPACING) {
+            if (rowsPlaced.length >= laneCap) break;
             if (nearTaken(rowTaken, y)) continue;               // 与已有街相距 <= 3 会出碎路
             const run = longestRun(bx, bx + bw - 1, y, true);
             if (run === null) continue;
             const [x0, x1] = run;
-            for (let x = x0; x <= x1; x++) stamp(laneEW, x, y);   // 每格一次，图块自带 1x3 画幅
+            for (let x = x0; x <= x1; x++) stampRoad(x, y, true);   // 每格一次，图块自带 1x3 画幅
             if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
             if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
             rowTaken.push(y);
@@ -447,11 +454,12 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             streets++;
         }
         for (let x = bx + FIRST_COL_OFFSET; x <= bx + bw - 5; x += ROAD_SPACING) {
+            if (colsPlaced.length >= laneCap) break;
             if (nearTaken(colTaken, x)) continue;
             const run = longestRun(by, by + bh - 1, x, false);
             if (run === null) continue;
             const [y0, y1] = run;
-            for (let y = y0; y <= y1; y++) stamp(laneNS, x, y);   // 同上，图块自带 3x1 画幅
+            for (let y = y0; y <= y1; y++) stampRoad(x, y, false);   // 同上，图块自带 3x1 画幅
             if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
             if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
             colTaken.push(x);
@@ -502,7 +510,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             order[i] = order[j]!;
             order[j] = t;
         }
-        const perBlock = randRange(1, 2);
+        const perBlock = randRange(2, 3);
         for (const b of order) {
             for (let k = 0; k < perBlock; k++) {
                 const type = catalog[randRange(0, catalog.length - 1)]!;
