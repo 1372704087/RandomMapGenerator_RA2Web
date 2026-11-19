@@ -117,8 +117,10 @@ NEWURBAN  = 温带编号                        中隔 856
 每格要求：在图上、`level` 与锚点相同（不压平 —— 压平会让 FA2 打开 SNOW `043.map` 崩溃）、
 可通行、无 overlay、`isoTileTypeIndex != 0xFFFF`；离出生点 Chebyshev ≤ 安全半径（默认 10）的锚点放弃。
 
-建筑落在街区里（离任一条街 ≥ 4 格），逐栋走 `foundationFitsAtFlat(apron=1)`
-（同高、平坦、周边 1 格净空），写入 `structures` 表（`houseName=None House`、`facing=256`）。
+建筑（`0x5A6510`）按城区收尾各跑一次：名单随机取一条、用掉就删（`Block += 1` 后删表），
+所以同一个名字在一个城区里最多出现一次；每条最多试 60 格，落点从该城区的包围盒里随机取，
+只查「格子本身能不能盖」（`foundationFitsAtFlat(apron=1)` + 覆盖格不能是街面），
+不要求「离街 ≥4 格」—— 引擎也没有这条。
 
 数量：`urbanAreas: true` 按面积折算 `clamp(round(w*h/2500), 1, 8)`；传数字以数字为准。
 （引擎的公式是 `ftol((MapSeedClass+0x60 + 0.32) * 3.0)` 与概率门 `randUnit() < 1 - field60`，
@@ -189,7 +191,9 @@ node scratch\urban-run.mjs <theater> <seed>       # 端到端生成 + 渲染
   所以同一轮里铺出来的是正交网格，不是一条蜿蜒的曲线街；
 * 每轮 10 轮的上限与引擎一致，10 轮都能落脚；每轮的路径长度在第二轮起按 0.55 折减
   （引擎每轮用的是同一套 `2*w*h/15` 区间，这里为了不让 10 轮把整张图铺满做了折减）；
-* 载具 / 步兵已实现：`0x5A6920` 对应 `placeCrowd`，载具压在车道格上、步兵贴街边 1..2 格；
+* 载具 / 步兵已实现：`0x5A6920` 对应 `placeCrowd`，每个城区只放 1..5 个对象、
+  最多试 2n 轮；每轮在 0..6 里取号（0..2 走步兵、3..6 走载具），落点从城区包围盒里随机取，
+  朝向是 `32 * rand(0..7)`（8 个方向），这正是反编译里 `place(coords, 32*v12)` 的写法；
   名单是 Ares 的 `[Urban] Vehicles` / `[Urban] Infantry` 默认值；
 * `.map` 现在会写出 `[Units]` / `[Infantry]` 两段，行格式照成品地图
   （`hillbtwn.map` 的 `Neutral,CAR,256,47,100,192,Sleep,None,0,-1,0,-1,1,1`、

@@ -233,8 +233,13 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             return Math.max(Math.abs(sx - x), Math.abs(sy - y)) <= safeRadius;
         });
 
+    /** 已铺过街的格子（建筑不能压上去；引擎查的是格子本身清不清，不是「离街几格」） */
+    const roadSet = new Set<number>();
+    const cellKey = (x: number, y: number): number => x * 8192 + y;
+
     const stamp = (tile: number, x: number, y: number): void => {
         placeWaterDetailTile(r, tile, packXY(i16(x), i16(y)), -1, -1);
+        roadSet.add(cellKey(x, y));
         stats.roadCells++;
     };
 
@@ -339,8 +344,6 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     const placedBoxes: { x: number; y: number; w: number; h: number }[] = [];
     const rowTaken: number[] = [];
     const colTaken: number[] = [];
-    /** 车道格（给 `0x5A6920` 的载具 / 步兵落脚用），每段隔几格采一个，别把整段都存下来 */
-    const streetCells: { x: number; y: number; level: number; horizontal: boolean }[] = [];
     const nearTaken = (list: number[], v: number): boolean => list.some((n) => Math.abs(n - v) <= 3);
 
     /**
@@ -386,7 +389,6 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (r.mediansIndex >= 0) {
                 for (let x = x0; x <= x1; x++) stamp(r.mediansIndex, x, y + 1);
             }
-            for (let x = x0; x <= x1; x += 3) streetCells.push({ x, y, level, horizontal: true });
             if (ok(x0 - 1, y)) stamp(ends + 2, x0 - 1, y);      // 西端（近端）
             if (ok(x1 + 1, y)) stamp(ends + 0, x1 + 1, y);      // 东端（远端）
             rowTaken.push(y);
@@ -401,7 +403,6 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             if (r.mediansIndex >= 0) {
                 for (let y = y0; y <= y1; y++) stamp(r.mediansIndex, x + 1, y);
             }
-            for (let y = y0; y <= y1; y += 3) streetCells.push({ x, y, level, horizontal: false });
             if (ok(x, y0 - 1)) stamp(ends + 1, x, y0 - 1);      // 北端
             if (ok(x, y1 + 1)) stamp(ends + 3, x, y1 + 1);      // 南端
             colTaken.push(x);
@@ -410,20 +411,51 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         return streets;
     };
 
-    /** `PlaceUrbanStructures`：建筑只落在街区里（离任一条街 >= 4 格） */
-    const placeStructures = (bx: number, by: number, bw: number, bh: number, level: number): void => {
-        if (catalog.length === 0) return;
-        const count = randRange(stMin, stMax);
+    type Box = { x: number; y: number; w: number; h: number };
+
+    /** 在城区任一包围盒内随便取一格（引擎是从城区格子表里随机取一格） */
+    const pickCellIn = (boxes: Box[]): [number, number] | null => {
+        if (boxes.length === 0) return null;
+        const b = boxes[randRange(0, boxes.length - 1)]!;
+        if (b.w < 4 || b.h < 4) return null;
+        return [randRange(b.x + 1, b.x + b.w - 2), randRange(b.y + 1, b.y + b.h - 2)];
+    };
+
+    /**
+     * `PlaceUrbanStructures`（`0x5A6510`）：名单随机取一条、用掉就删，
+     * 所以一个名字在同一城区最多出现一次；每条最多试 60 格。
+     */
+    const placeStructures = (boxes: Box[], level: number): void => {
+        if (catalog.length === 0 || boxes.length === 0) return;
+        const names = catalog.slice();
+        for (let i = names.length - 1; i > 0; i--) {
+            const j = randRange(0, i);
+            const t = names[i]!;
+            names[i] = names[j]!;
+            names[j] = t;
+        }
+        const count = Math.min(names.length, randRange(stMin, stMax));
         for (let n = 0; n < count; n++) {
-            const type = catalog[randRange(0, catalog.length - 1)]!;
-            const maxX = bx + bw - type.width - 2;
-            const maxY = by + bh - type.height - 2;
-            if (maxX < bx + 2 || maxY < by + 2) return;
-            for (let tries = 0; tries < 24; tries++) {
-                const px = randRange(bx + 2, maxX);
-                const py = randRange(by + 2, maxY);
-                if (rowTaken.some((ry) => Math.abs(py - ry) < 4)) continue;
-                if (colTaken.some((cx) => Math.abs(px - cx) < 4)) continue;
+            const type = catalog.length === 0 ? null : names[n]!;
+            if (type === null) return;
+            for (let tries = 0; tries < 60; tries++) {
+                const cell = pickCellIn(boxes);
+                if (cell === null) return;
+                const [px, py] = cell;
+                const maxX = px + type.width;
+                const maxY = py + type.height;
+                if (maxX > cols || maxY > rows) continue;
+                // 建筑不能压到街上（引擎查格子本身，不查「离街几格」）
+                let onRoad = false;
+                for (let dy = 0; dy < type.height && !onRoad; dy++) {
+                    for (let dx = 0; dx < type.width; dx++) {
+                        if (roadSet.has(cellKey(px + dx, py + dy))) {
+                            onRoad = true;
+                            break;
+                        }
+                    }
+                }
+                if (onRoad) continue;
                 const base = packXY(i16(px), i16(py));
                 if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 1)) continue;
                 recordPlacedBuilding(r, base, type.name, type.width, type.height);
@@ -434,65 +466,48 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
     };
 
     /**
-     * `0x5A6920`（加减员）：载具压在车道格上，步兵贴在街边的空地上。
-     * 方向按 RA2 的 0..255 编码：横街给 64/192、竖街给 0/128，看起来是顺着街停的。
+     * `0x5A6920`（加减员）：一个城区只放 1..5 个对象，最多试 2n 轮。
+     * 每轮在 0..6 里取一个号 —— 引擎那张表前三条是步兵、后几条是载具；
+     * 落点从城区格子里随机取，朝向是 32 的整数倍（8 个方向）。
      */
     const crowdTaken = new Set<number>();
-    const placeCrowd = (level: number, from: number, to: number): void => {
-        if (to <= from) return;
-        const cellKey = (x: number, y: number): number => x * 8192 + y;
+    const placeCrowd = (boxes: Box[], level: number): void => {
+        if (boxes.length === 0) return;
+        const total = randRange(1, 5);
+        let placed = 0;
+        let rounds = 0;
 
-        const pickStreet = (): { x: number; y: number; horizontal: boolean } | null => {
-            for (let i = 0; i < 24; i++) {
-                const c = streetCells[randRange(from, to - 1)]!;
-                if (c.level !== level) continue;
-                if (crowdTaken.has(cellKey(c.x, c.y))) continue;
-                if (cellOkForRoad(r, c.x, c.y, level) !== null) continue;
-                return c;
+        while (placed < total && rounds < 2 * total) {
+            rounds++;
+            const slot = randRange(0, 6);
+            const isInfantry = slot <= 2;
+            const list = isInfantry ? ARES_URBAN_INFANTRY : ARES_URBAN_VEHICLES;
+            if (list.length === 0) break;
+            const type = list[randRange(0, list.length - 1)]!;
+            const facing = 32 * randRange(0, 7);
+
+            for (let tries = 0; tries < 60; tries++) {
+                const cell = pickCellIn(boxes);
+                if (cell === null) break;
+                const [px, py] = cell;
+                if (crowdTaken.has(cellKey(px, py))) continue;
+                if (cellOkForRoad(r, px, py, level) !== null) continue;
+                const coords = packXY(i16(px), i16(py));
+                if (isInfantry) {
+                    r.infantry.push({
+                        coords, typeName: type, houseName: '', facing, subCell: randRange(0, 4),
+                    });
+                    stats.infantry++;
+                } else {
+                    r.units.push({
+                        coords, typeName: type, houseName: '', facing, subCell: 0,
+                    });
+                    stats.vehicles++;
+                }
+                crowdTaken.add(cellKey(px, py));
+                placed++;
+                break;
             }
-            return null;
-        };
-
-        const vehicles = randRange(1, 3);
-        for (let n = 0; n < vehicles && ARES_URBAN_VEHICLES.length !== 0; n++) {
-            const c = pickStreet();
-            if (c === null) break;
-            const type = ARES_URBAN_VEHICLES[randRange(0, ARES_URBAN_VEHICLES.length - 1)]!;
-            const facing = c.horizontal
-                ? (r.rng.unit() < 0.5 ? 64 : 192)
-                : (r.rng.unit() < 0.5 ? 0 : 128);
-            r.units.push({
-                coords: packXY(i16(c.x), i16(c.y)),
-                typeName: type,
-                houseName: '',
-                facing,
-                subCell: 0,
-            });
-            crowdTaken.add(cellKey(c.x, c.y));
-            stats.vehicles++;
-        }
-
-        const infantry = randRange(4, 10);
-        for (let n = 0; n < infantry && ARES_URBAN_INFANTRY.length !== 0; n++) {
-            const c = pickStreet();
-            if (c === null) break;
-            // 贴街边：横街往上下放、竖街往左右放，1..2 格
-            const side = r.rng.unit() < 0.5 ? -1 : 1;
-            const off = randRange(1, 2);
-            const px = c.horizontal ? c.x : c.x + side * off;
-            const py = c.horizontal ? c.y + side * off : c.y;
-            if (cellOkForRoad(r, px, py, level) !== null) continue;
-            if (crowdTaken.has(cellKey(px, py))) continue;
-            const type = ARES_URBAN_INFANTRY[randRange(0, ARES_URBAN_INFANTRY.length - 1)]!;
-            r.infantry.push({
-                coords: packXY(i16(px), i16(py)),
-                typeName: type,
-                houseName: '',
-                facing: randRange(0, 255),
-                subCell: randRange(0, 4),
-            });
-            crowdTaken.add(cellKey(px, py));
-            stats.infantry++;
         }
     };
 
@@ -526,7 +541,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         let centerY = -1;
         let centerLevel = 0;
         const areaStart = placedBoxes.length;   // 本城区之前的盒子（跨城区间距只跟它们比）
-        const cellStart = streetCells.length;   // 本城区的车道格起点（加减员只在这段里挑）
+        const areaBoxes: Box[] = [];            // 本城区已落下的包围盒（建筑 / 加人从这里取格）
 
         for (let round = 0; round < ROUNDS_PER_AREA && boxes < BOXES_PER_AREA; round++) {
             stats.attempts++;
@@ -612,7 +627,7 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                 continue;
             }
             placedBoxes.push({ x: bx, y: by, w: bw, h: bh });
-            placeStructures(bx, by, bw, bh, level);
+            areaBoxes.push({ x: bx, y: by, w: bw, h: bh });
             boxes++;
             stats.locations.push({ x: bx, y: by, w: bw, h: bh, streets });
         }
@@ -620,8 +635,9 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
             reject('emptyarea');
             continue;
         }
-        // 0x5A6920 每个城区收尾跑一次（不是每块包围盒一次）
-        placeCrowd(centerLevel, cellStart, streetCells.length);
+        // 0x5A6510 / 0x5A6920 都是每个城区收尾各跑一次（不是每块包围盒一次）
+        placeStructures(areaBoxes, centerLevel);
+        placeCrowd(areaBoxes, centerLevel);
         stats.areas++;
     }
 
