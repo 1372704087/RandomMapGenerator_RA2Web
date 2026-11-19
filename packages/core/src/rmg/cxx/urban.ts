@@ -511,33 +511,41 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      * 再 `v6 = v5 >> 1` 作为要成功放下的目标 —— 也就是 `[cells/40, cells/20]`，
      * 最后被名单长度封顶（Ares 默认 13 条结构）。
      */
+    /** 落一栋：底座外一圈不能压街、也不能贴已有楼（高楼贴图会互相压住） */
+    const tryPutBuilding = (
+        px: number, py: number, type: { name: string; width: number; height: number }, level: number,
+    ): boolean => {
+        if (!r.cellExists(px, py)) return false;
+        // 这张图按菱形存，x 可以超过 mapWidth（合法条件是 mapWidth < x+y <= ...），
+        // 所以边界只能逐个角去问 cellExists，不能拿 mapWidth 当 x 的上限。
+        if (!r.cellExists(px + type.width - 1, py + type.height - 1)) return false;
+        if (!r.cellExists(px + type.width - 1, py)) return false;
+        if (!r.cellExists(px, py + type.height - 1)) return false;
+        for (let dy = -1; dy <= type.height; dy++) {
+            for (let dx = -1; dx <= type.width; dx++) {
+                const k = cellKey(px + dx, py + dy);
+                if (roadSet.has(k) || buildingSet.has(k)) return false;
+            }
+        }
+        const base = packXY(i16(px), i16(py));
+        if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) return false;
+        recordPlacedBuilding(r, base, type.name, type.width, type.height);
+        for (let dy = 0; dy < type.height; dy++) {
+            for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
+        }
+        stats.structures++;
+        return true;
+    };
+
     const placeStructures = (blocks: Box[], boxes: Box[], level: number): void => {
         if (catalog.length === 0 || boxes.length === 0) return;
 
         /** 落一栋：底座外一圈不能压街、也不能贴已有楼（高楼贴图会互相压住） */
-        const tryPlace = (px: number, py: number, type: { name: string; width: number; height: number }): boolean => {
-            if (!r.cellExists(px, py)) return false;
-            if (px < 0 || py < 0 || px + type.width > r.size.mapWidth || py + type.height > r.size.mapHeight) {
-                return false;
-            }
-            for (let dy = -1; dy <= type.height; dy++) {
-                for (let dx = -1; dx <= type.width; dx++) {
-                    const k = cellKey(px + dx, py + dy);
-                    if (roadSet.has(k) || buildingSet.has(k)) return false;
-                }
-            }
-            const base = packXY(i16(px), i16(py));
-            if (!foundationFitsAtFlat(r, base, level, type.width, type.height, 0)) return false;
-            recordPlacedBuilding(r, base, type.name, type.width, type.height);
-            for (let dy = 0; dy < type.height; dy++) {
-                for (let dx = 0; dx < type.width; dx++) buildingSet.add(cellKey(px + dx, py + dy));
-            }
-            stats.structures++;
-            return true;
-        };
+        const tryPlace = (px: number, py: number, type: { name: string; width: number; height: number }): boolean =>
+            tryPutBuilding(px, py, type, level);
 
-        // 每片城区想放 8..12 栋（用户要求楼多、路少）
-        const target = randRange(8, 12);
+        // 每片城区想放 6..10 栋（用户要求楼多、遍布全图）
+        const target = randRange(6, 10);
         let placed = 0;
 
         // 第一轮：按街区填，每块 3 栋，先散开街区顺序
@@ -572,6 +580,37 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
                     placed++;
                     break;
                 }
+            }
+        }
+    };
+
+    /**
+     * 全图撒楼：城区只覆盖局部街区，用户要求「建筑遍布全图」，
+     * 所以按 14×14 的格子在全图取点，每格最多补一栋（间距/街面规则不变）。
+     */
+    const scatterBuildings = (): void => {
+        if (catalog.length === 0) return;
+        const step = 14;
+        const spots: Array<[number, number]> = [];
+        for (let y = 2; y < r.size.mapHeight; y += step) {
+            for (let x = 2; x < r.size.mapWidth + r.size.mapHeight; x += step) {
+                if (!r.cellExists(x, y)) continue;
+                spots.push([x, y]);
+            }
+        }
+        for (let i = spots.length - 1; i > 0; i--) {
+            const j = randRange(0, i);
+            const t = spots[i]!;
+            spots[i] = spots[j]!;
+            spots[j] = t;
+        }
+        for (const [sx, sy] of spots) {
+            const type = catalog[randRange(0, catalog.length - 1)]!;
+            for (let tries = 0; tries < 8; tries++) {
+                const px = sx + randRange(1, step - 3);
+                const py = sy + randRange(1, step - 3);
+                if (!r.cellExists(px, py)) continue;
+                if (tryPutBuilding(px, py, type, r.cellAt(px, py).level)) break;
             }
         }
     };
@@ -633,6 +672,57 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
      */
     const ROUNDS_PER_AREA = 10;          // 引擎的 10 轮是「这一片最多试 10 次」
     const BOXES_PER_AREA = 1;            // 一个城区最终只落一块包围盒（多块叠起来会铺满全图）
+
+    /**
+     * 把整张图按 `total` 个城区切成均匀分区，第 `index` 个城区在自己的分区中心附近取锚点。
+     * `randomCorner` 是纯随机取点，实测会挤在菱形中部；这里强制铺开，
+     * 才能做到「建筑遍布全图」。
+     */
+    const partitionAnchor = (
+        index: number, total: number, span: number, boxes: Box[],
+    ): [number, number] | null => {
+        const mw = r.size.mapWidth;
+        const mh = r.size.mapHeight;
+        const sLo = mw + span + 3;
+        const sHi = mw + 2 * mh - span - 3;
+        if (sHi <= sLo) return null;
+        const dMax = Math.min(mw - 2, mw - span - 4);
+        if (dMax <= 0) return null;
+
+        // (s, d) 是菱形坐标：s = x+y 沿一条对角线走，d = |x-y| 是垂直方向。
+        // 两向都分区，才能铺满整张菱形；只按 s 分会挤成一条斜带。
+        const bands = Math.max(1, Math.ceil(Math.sqrt(total)));
+        const band = Math.floor(index / bands);          // s 方向第几段
+        const col = index % bands;                       // d 方向第几段
+        const sCenter = sLo + ((sHi - sLo) * (band + 0.5)) / bands;
+        const dCenter = (dMax * (col + 0.5)) / bands;
+        const sign = col % 2 === 0 ? 1 : -1;
+
+        // 分区中心常常正好落在矿田/水面上，所以往外螺旋找第一个可铺路的格
+        const farFromBoxes = (x: number, y: number): boolean => boxes.every((b) => {
+            const dx = Math.max(b.x - x, x - (b.x + b.w));
+            const dy = Math.max(b.y - y, y - (b.y + b.h));
+            return Math.max(dx, dy) > 4;
+        });
+        for (let rad = 0; rad <= Math.round(span * 2.5); rad += 2) {
+            for (let i = 0; i < 24; i++) {
+                const s = sCenter + randRange(-rad, rad);
+                const d = dCenter + randRange(-rad, rad);
+                if (d < 0 || d >= dMax) continue;
+                const si = Math.round(s);
+                const di = Math.round(d);
+                if (((si + di) & 1) !== 0) continue;
+                const x = (si + sign * di) / 2;
+                const y = (si - sign * di) / 2;
+                if (!r.cellExists(x, y)) continue;
+                const level = r.cellAt(x, y).level;
+                if (cellOkForRoad(r, x, y, level) !== null) continue;
+                if (!farFromBoxes(x, y)) continue;
+                return [x, y];
+            }
+        }
+        return null;
+    };
 
     /** 在中心附近取一个可铺路的点（先按给定半径，找不到就逐级放宽） */
     const randomNear = (cx: number, cy: number, radius: number, level: number): [number, number] | null => {
@@ -796,6 +886,9 @@ export function addUrbanAreas(r: Rmg, options: UrbanAreaOptions): UrbanAreaStats
         placeCrowd(areaBoxes, centerLevel);
         stats.areas++;
     }
+
+    // 城区收尾后再全图补齐，让楼真正铺到整张地图
+    scatterBuildings();
 
     if (process.env.RMG_DEBUG_URBAN) {
         // eslint-disable-next-line no-console
