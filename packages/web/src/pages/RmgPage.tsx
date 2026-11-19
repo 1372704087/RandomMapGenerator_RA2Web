@@ -19,6 +19,8 @@ export default function RmgPage() {
   const [players, setPlayers] = useState(2); // playerIndex：0 → 2 人 … 6 → 8 人
   const [ore, setOre] = useState(1); // 矿密度 0..3
   const [theater, setTheater] = useState(0); // 0 温带 / 1 雪地 / 2 城市 / 3 沙漠 / 4 新城市 / 5 月球
+  /** Ares Create Urban Areas 开关 */
+  const [urban, setUrban] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [result, setResult] = useState<CxxGenerateResult | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -40,6 +42,7 @@ export default function RmgPage() {
         mapSize: size,
         playerIndex: players,
         oreDensity: ore,
+        urbanAreas: urban,
       });
       setResult(res);
       setStatus({
@@ -143,10 +146,21 @@ export default function RmgPage() {
               <option value={2}>2</option>
               <option value={3}>3</option>
             </select>
+          <div className="field">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={urban}
+                onChange={(e) => setUrban(e.target.checked)}
+              />
+              <span>生成城区（Ares Create Urban Areas）</span>
+            </label>
+            <span className="field-hint">
+              在 <code>0x598FB8</code> 挂钩点铺 3 格宽街道（车道 / 中间带 / 车道），
+              两侧按 Ares 默认名单放城区建筑
+            </span>
           </div>
         </div>
-
-        <div className="button-row" style={{ marginTop: 14 }}>
           <button
             type="button"
             className="btn-generate"

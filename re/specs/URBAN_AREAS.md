@@ -1,104 +1,131 @@
-# 城区生成（Ares「Create Urban Areas」）
+# 城区生成（Ares「Create Urban Areas」，原版管线）
 
-对齐 Ares 3.0 随机地图生成器里的 **Create Urban Areas** 复选框：在已生成的地图上随机挑点，
-铺一段街道 + 放一批城区战斗建筑 / 载具 / 平民。
+对齐 Ares 3.0 的 **Create Urban Areas** 复选框：在 `RmgPage`（原版随机地图生成器）的
+cxx 管线里插一个阶段，挑点 → 铺一段多格宽街道 → 街道两侧放城区建筑。
+
+> 只挂在**原版管线**（`packages/core/src/rmg/cxx/`，vera20k 逐函数平移 gamemd）。
+> 切片管线（`POST /api/generate` → `generator.ts`）不再有任何城区代码。
 
 ## 1. Ares 语义
 
-Ares 自己**不画街道**，它只是打开引擎里原有的 `MapSeedClass::PlaceUrbanStructures` /
-`PlacePavedRoads` 流程（`src/Misc/RMG.cpp` 的 `RMG_GenerateUrban` 钩子调用 `0x5A5020`），
-并把名单换成 `rmgmd.ini` 的 `[Urban]` 三段。默认值：
+Ares 自己不画街道，只是打开引擎原有的 `MapSeedClass::PlaceUrbanStructures` /
+`PlacePavedRoads`（`0x598FB8` 处 `CALL(0x5A5020)`），名单换成 `rmgmd.ini [Urban]` 三段。
+仓库没有 `rmgmd.ini`，用 Ares 默认值硬编码：
 
-| 段 | Ares 默认 |
+| 段 | 名单 |
 | --- | --- |
 | `Structures` | `CABUNK01,CABUNK02,CAARMY01,CAARMY02,CAARMY03,CAARMY04,CACHIG03,CANEWY01,CANEWY14,CANWY09,CANWY26,CANWY25,CATEXS07` |
 | `Vehicles` | `TRUCKA,TRUCKB,COP,EUROC,SUVW,SUVB,FTRK,AMBU` |
 | `Infantry` | `CIV1,CIV2,CIV3,CIVA,CIVB,CIVC` |
 
-本仓库不读 `rmgmd.ini`（没有这个文件），直接用上表硬编码，见
-`packages/core/src/urban/urbanAreas.ts` 的 `ARES_URBAN_STRUCTURES / _VEHICLES / _INFANTRY`。
+Vehicles / Infantry 目前只是常量占位：cxx 的 `.map` 写出只有
+`[IsoMapPack5]/[OverlayPack]/[OverlayDataPack]/[Structures]`，没有 `[Units]` / `[Infantry]` 段。
 
 ## 2. 实现落点
 
 | 位置 | 作用 |
 | --- | --- |
-| `packages/core/src/urban/urbanAreas.ts` | `generateUrbanAreas()`：挑点 → 铺街道 → 放建筑 / 载具 / 步兵 |
-| `packages/server/src/generator.ts` | 步骤 **8b**（损坏建筑之后、污迹之前）调用；城区建筑不会被 `ChangeStructureHealth` 拆掉，街道也不会被污迹覆盖 |
-| `packages/server/src/types.ts` | `GenerateOptions.urbanAreas?: boolean \| number` |
-| `packages/web/src/pages/GeneratePage.tsx` | 「生成城区」复选框，透传 `urbanAreas` |
+| `packages/core/src/rmg/cxx/urban.ts` | `addUrbanAreas(rmg, {areas})`：挑点 → 铺街道 → 放建筑；`MEDIAN_TILES`、`loadCatalogs()`、`corridorCellOk()` |
+| `packages/core/src/rmg/cxx/generate.ts` | 挂钩：`recalculateCellAttributes`（`0x598FB8`）之后、`0x59912A` 之前，之后跟 `scanMaxLevel('after-urban')` |
+| `packages/server/src/rmgCxxService.ts` | `CxxGenerateInput.urbanAreas?: boolean \| number` → `GenerateParams.urbanAreas` |
+| `packages/web/src/pages/RmgPage.tsx` | 复选框「生成城区（Ares Create Urban Areas）」 |
+| `packages/web/src/api.ts` | `generateRmgCxx` 载荷类型加 `urbanAreas?` |
 
-数量：`urbanAreas: true` 时按面积折算 `round(w*h/2500)`（夹在 1..8），传数字则以数字为准。
+数量：`urbanAreas: true` 按面积折算 `clamp(round(w*h/2500), 1, 8)`；传数字以数字为准。
 
-## 3. 道路图块（实测，不要照 theater ini 推）
+## 3. 街道必须是三格宽（车道 / 中间带 / 车道）
 
-`TileNum` 的真实编号规则是 **前面所有 `TilesInSet` 之和 + 局部序号**，但仓库里的
-`packages/server/resources/theater/*.ini` 与 RA2 实际地图不同源：
+手工城市块里没有「一格街」这种东西，全部是 **三格带**：两条车道夹一条中间带。
+一格宽的直段在实图里根本不存在，所以本实现一律铺三格：
 
-* `temperatmd.ini` / `snowmd.ini` 算出 `Paved Roads = 293..313`，与实图一致；
-* `urbannmd.ini` 算出 299..319、`desertmd.ini` 算出 272..292，与实图**不一致**。
+```
+EW 向： (x0+i, y0-1)=车道   (x0+i, y0)=中间带   (x0+i, y0+1)=车道
+NS 向： (x0-1, y0+i)=车道   (x0,   y0+i)=中间带 (x0+1, y0+i)=车道
+```
 
-因此下表的图块号是从 316 个手工城市块里实测反推的（按「同号图块长直线」统计）：
-
-| theater | 东西向直段（常量 Y） | 南北向直段（常量 X） | 证据 |
+| theater | 车道 EW / NS | 中间带 | 说明 |
 | --- | --- | --- | --- |
-| `TEMPERATE` | **293** | **294** | 59 个单元，293 长直线 3124 段 / 294 3119 段；minimap 色 `83,85,87` / `131,132,128` |
-| `SNOW` | **293** | **294** | 与 TEMPERATE 完全同数据（snow 块是 temperate 的副本） |
-| `NEWURBAN` | **293** | **294** | 53 个单元，293 有 8223 格（EW 占 66%）、294 有 8255 格（NS 占 66%），城块高度 z=4 |
-| `TEMPERATE_Islands` | **293** | **294** | 31 个单元，293/294 各 3379 格 |
-| `DESERT` | **265** | **266** | 80 个单元，265 长直线 7040 段 / 266 7040 段；minimap 色与 temperate 的 293/294 完全相同 |
+| `TEMPERATE` | 293 / 294 | 原地形 | 实图中间就是 grass（`TEMPERATE/empty.map` y=9、y=11 各一排 293，y=10 是草） |
+| `SNOW` | 293 / 294 | 原地形 | `snowmd.ini` `Medians = -1` |
+| `NEWURBAN` | 293 / 294 | **856** | 全库中隔 856 出现 3072 次 |
+| `DESERT` | 265 / 266 | **392** | 全库中隔 392 出现 4121 次；minimap 配色与 temperate 的 293/294 同族 |
+| `URBAN` / `LUNAR` | 293 / 294（`LUNAR` 无城区素材） | 原地形 | — |
 
-`293 = 常量 Y` 方向、`294 = 常量 X` 方向（等距投影里分别是两条斜向）。
+`TileNum` = 前面所有 `TilesInSet` 之和 + 局部序号。`packages/server/resources/theater/*.ini`
+与实图不同源（`urbannmd.ini` 推 299..319、`desertmd.ini` 推 272..292 都不对），
+上表图块号是从 316 个手工城市块按「同号图块长直线」实测反推的。
 
-### 已否证的推断（别再走这两条路）
+### 已否证的推断（别再走）
 
-1. **overlay 不是道路**：手工城市块里的 `[OverlayPack]` 全是资源与装饰 —— `24=DUMMY15`、
-   `25/26=BRIDGE1/2`、`30=GEM03`、`112=TIB08`、`168..177=岩石/VEINHOLE`、`203/204=FENCE20/21`、
-   `237/238=LOBRDGB1/2`（`rulesmd.ini` 的 `[OverlayTypes]` 逐条对号）。自绘道路不能走 overlay 路线。
-2. **`TileNum >> 8` 不是 tileset 索引**：五 theater 按 `20*256=5120..5375` 过滤命中 0 个图块；
-   实际 TileNum 都 < ~2000，高字节只有 0..4，且存在 `-1`（无图块哨兵）。
-3. **端头图块暂不可用**：`Paved Road Ends`（445..448）实测渲染中，445/446/448 正常，
-   **447 渲染成纯黑块**（缺图或不是端头片）。所以当前版本不盖端头，街道两端是直段裸端。
+1. **overlay 不是道路**：手工块 `[OverlayPack]` 全是资源与装饰（`DUMMY15`、`BRIDGE1/2`、`GEM03`、
+   `TIB08`、岩石/`VEINHOLE`、`FENCE20/21`、`LOBRDGB1/2`）。自绘道路不能走 overlay。
+2. **`TileNum >> 8` 不是 tileset 索引**：五 theater 命中 0 个图块。
+3. **端头片 445/446/448 可用、447 渲染成纯黑块**：当前版本不盖端头，街道两端是裸直段。
 
 ## 4. 落位校验
 
-一条街道 = 一格宽的直线（长度 6..10，方向随机 EW / NS）。选中一条街道后：
+* 锚点在菱形坐标里取样：合法格满足 `mapWidth < x+y <= mapWidth+2*mapHeight` 且 `|x-y| < mapWidth`，
+  所以按 `(s=x+y, d=|x-y|)` 取样再反解 `x/y`（同奇偶），比在大网格里随机 slot 碰运气稳得多；
+* 整条街的每个格都要：在图上、`level` 与锚点相同（不用压平，压平会让 FA2 打开 SNOW `043.map` 崩溃）、
+  可通行（不是水面 / 悬崖 / 已有建筑）、`isoTileTypeIndex` 不是 `0xFFFF`；
+* 离出生点 Chebyshev ≤ 安全半径（默认 8）→ 放弃；
+* 街道格上的 overlay（树 / 矿 / 污迹）直接清掉（Ares 也是覆盖式铺路）。
 
-* 街道格必须 `IsOnMapAT`、`TileNum >= 0`、**同一 Z**、无水面；
-* 水面判定用 `minimap.ini` 的 `[theater]` 配色：`b >= 78 && b - r >= 15 && b - g >= 12` 视为深蓝水
-  （能区分 `65,67,88` 的水面与 `83,85,87` 的沥青）；
-* 有建筑 / 单位 / 步兵 / 桥 / 神经科技建筑 → 放弃这个点；
-* 离 `WaypointList` 的 Chebyshev 距离 ≤ 10 → 放弃（护住出生点）；
-* 街道格上的树 / 矿石 / 污迹会被清掉（Ares 也是覆盖式铺路）。
+建筑：`rulesmd.ini` 里真实存在 ∩ 底座 ≤ 3x3 的名单项，街道两侧各一条带，
+逐栋走 `foundationFitsAtFlat(apron=1)`（要求同高、平坦、周边 1 格净空），
+写入 `structures` 表（`houseName=None House`、`facing=256`）。
 
-建筑摆放：`Ares` 名单 ∩ `rulesmd.ini` 实际存在 ∩ 底座 ≤ 3x3，街道两侧各一排，
-逐栋 `WorkingMap.CanPlaceStructure()` + 自己的同高 / 无水 / 不压街道校验；
-写入 `Structure`（`Owner=Neutral`、`Strength=256`、`Direction=64`，与手工块一致）。
+## 5. 前提：路面 TMP 必须齐全
 
-载具 / 步兵：落在街道格上，字段照手工块的写法（`State=Guard`、`Tag=None`、`Group=-1`、
-`FollowerID=-1`、`AutocreateNoRecruitable=1`）。
+`recalculateCellAttributes` 会对「TMP 表里没有这一帧」的格子直接擦成 `0xFFFF`，
+所以**车道/中间带图块必须有对应的 TMP**，否则铺上去立刻被 recalc 抹掉（表现为完全看不到街道）。
 
-## 5. 已知限制（v1）
+五 theater 的 TMP 来源：
 
-* 只铺一条直线街道，不做转角 / 交叉，所以不需要 junction / corner 图块；
-* 街道宽度 1 格，没有人行道 / 中隔（`Medians`、`Paved Road Ends` 未接）；
-* 不读 `rmgmd.ini`，名单写死在代码里；
-* Ares 已知问题同样适用：小地图预览与实图不完全一致（尤其沙漠）。
+| theater | 目录 | 现状 |
+| --- | --- | --- |
+| `TEMPERATE` | `G:\MapGenerator\Tile资源\温和\` | 原版 MapGenerator 只抽了地形/建筑件，**缺 `Proad*`/`Ovrps*`/`Medians*`**；已用 `scripts/extract-theater-tiles.mjs` 从 `isotemp.mix` 补齐 233 个 TMP（`Proad01..21.tem` 等） |
+| `SNOW` | `G:\MapGenerator\Tile资源\雪地\` | `proad01.sno` 等已存在 |
+| `URBAN` / `DESERT` / `NEWURBAN` | `packages/server/resources/theater-tiles/<theater>/` | 由同一脚本从 theater mix 抽出 |
+
+补齐方式（只补缺的，不覆盖已有件）：
+
+```powershell
+node scripts\extract-theater-tiles.mjs --game-dir "F:/Red-Alert-2-Yuris-Revenge" --theater temperate --merge-stock
+# -> G:\MapGenerator\Tile资源\温和   written=0 kept=494 missing=310（重复跑是幂等的）
+```
+
+补齐后用 `scratch/urban-frames-all.mjs` 复核（应看到 `laneEW/laneNS 帧3`、`median 帧1`）：
+
+```
+theater 0: laneEW=293 帧3  laneNS=294 帧3  pave=534 帧1  median=479 帧1  miscPave=449 帧1
+theater 1: laneEW=293 帧3  laneNS=294 帧3  pave=734 帧0  median=-1(无)  miscPave=735 帧1
+theater 3: laneEW=265 帧3  laneNS=266 帧3  pave=502 帧1  median=447 帧1  miscPave=417 帧1
+theater 4: laneEW=293 帧3  laneNS=294 帧3  pave=534 帧1  median=479 帧1  miscPave=449 帧1
+```
 
 ## 6. 调试
 
-生成日志里有一行：
+生成日志（`POST /api/rmg/cxx/generate` 时在服务端 stderr / `URBAN:` 诊断行）有一行：
 
 ```
-[generator] urban areas: 3 区 / 街道 22 格 / 建筑 8 / 载具 4 / 步兵 5 (尝试 32 次) 位置 ew@41,80/9 ns@74,55/9
+URBAN: TEMPERATE 3 区 / 街道 48 格 / 建筑 7 (尝试 12 次) 位置 ew@55,95/10 ew@54,80/8 ns@41,72/6
 ```
 
-`位置` 是 `方向@起点/长度`，可直接拿去 FA2 / cncmaps 里核对。全部尝试失败时会打出原因计数
-（`invalid` / `offmap` / `z` / `occupied` / `water` / `waypoint` / `bounds`）。
+`位置` 是 `方向@锚点/长度`（锚点指向中间带的起点）。全部失败时打印原因计数
+（`anchor` / `offmap` / `bounds` / `z` / `blocked` / `notile` / `startingpoint`）。
 
-cncmaps 真图渲染（需要本机有 RA2 游戏目录）：
+探针：
 
 ```powershell
-# 1) 起渲染服务（5174）
-pwsh scripts/start-cncmaps-web.ps1
-# 2) 起后端（3000），然后 POST /api/cncmaps-preview，body: { mapContent, name, width }
+pnpm build:core
+node scratch\urban-render.mjs 0 0x38ad52f1 scratch\cxx_urban_0.map   # 生成并落盘
+# 再 POST /api/cncmaps-preview { mapContent, name }（不传 width 走默认 1600px）
 ```
+
+## 7. 已知限制
+
+* 只有直线段，没有转角 / 交叉口（不需要 junction / corner 图块）；
+* 不盖端头（447 渲染黑块）；
+* 载具 / 步兵未实现（`.map` 没有对应段）；
+* `TEMPERATE` / `SNOW` 的中间带是原地形（与实图一致），不是铺装带。

@@ -33,7 +33,7 @@ const THEATERS = {
 };
 
 function parseArgs(argv) {
-  const out = { gameDir: process.env.CNCMAPS_GAME_DIR ?? null, theater: null, cncmapsDir: 'G:/cncmaps-ts', iniDir: null, outDir: null };
+  const out = { gameDir: process.env.CNCMAPS_GAME_DIR ?? null, theater: null, cncmapsDir: 'G:/cncmaps-ts', iniDir: null, outDir: null, mergeStock: false, resourceDir: 'G:/MapGenerator/x64/Release' };
   for (let i = 0; i < argv.length; ++i) {
     const k = argv[i];
     const v = argv[i + 1];
@@ -42,6 +42,8 @@ function parseArgs(argv) {
     else if (k === '--cncmaps-dir') { out.cncmapsDir = v; ++i; }
     else if (k === '--ini-dir') { out.iniDir = v; ++i; }
     else if (k === '--out-dir') { out.outDir = v; ++i; }
+    else if (k === '--resource-dir') { out.resourceDir = v; ++i; }
+    else if (k === '--merge-stock') { out.mergeStock = true; }
     else if (k === '--help' || k === '-h') { console.log('见文件头注释'); process.exit(0); }
     else throw new Error(`未知参数 ${k}`);
   }
@@ -84,12 +86,16 @@ function main() {
     const def = THEATERS[key];
     if (!def) throw new Error(`未知 theater：${key}`);
 
-    const outDir = path.join(outRoot, key);
-    if (fs.existsSync(def.stock)) {
+    // artDir() 找的是 <exeDir>/../../Tile资源/<stock>（exeDir 默认
+    // G:/MapGenerator/x64/Release），不是游戏目录旁边那份。
+    const stockRoot = path.resolve(args.resourceDir, '..', '..', 'Tile资源');
+    const outDir = args.mergeStock
+      ? path.join(stockRoot, def.stock)
+      : path.join(outRoot, key);
+    if (!args.mergeStock && fs.existsSync(def.stock)) {
       // 已经放好（比如 温和/雪地），不覆盖用户的解包
-      const stockDir = path.join(path.dirname(args.gameDir), 'Tile资源', def.stock);
-      if (fs.existsSync(stockDir)) {
-        console.log(`${key}: 游戏目录已有 Tile资源/${def.stock}，跳过`);
+      if (fs.existsSync(path.join(stockRoot, def.stock))) {
+        console.log(`${key}: 已有 Tile资源/${def.stock}，跳过（要补缺失件请加 --merge-stock）`);
         continue;
       }
     }
@@ -110,22 +116,25 @@ function main() {
 
     fs.mkdirSync(outDir, { recursive: true });
     let written = 0;
+    let kept = 0;
     const perMix = new Map();
     for (const tileName of wanted) {
+      const dstPath = path.join(outDir, tileName);
+      if (args.mergeStock && fs.existsSync(dstPath)) { kept += 1; continue; }
       for (const { name, mix } of mixes) {
         if (!mix.containsFile(tileName)) continue;
         const f = mix.openFile(tileName);
         if (!f) continue;
         f.position = 0;
-        fs.writeFileSync(path.join(outDir, tileName), new Uint8Array(f.read(f.length)));
+        fs.writeFileSync(dstPath, new Uint8Array(f.read(f.length)));
         written += 1;
         perMix.set(name, (perMix.get(name) ?? 0) + 1);
         break;
       }
     }
-    const missing = wanted.length - written;
+    const missing = wanted.length - written - kept;
     const from = [...perMix].map(([m, c]) => `${m}:${c}`).join(' ');
-    console.log(`${key}: wanted=${wanted.length} written=${written} missing=${missing}  (${from}) -> ${outDir}`);
+    console.log(`${key}: wanted=${wanted.length} written=${written} kept=${kept} missing=${missing}  (${from}) -> ${outDir}`);
   }
 }
 

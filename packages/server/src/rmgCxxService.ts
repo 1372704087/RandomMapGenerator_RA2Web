@@ -56,6 +56,11 @@ export interface CxxGenerateInput {
   gameType?: number;
   /** 地图文件名（不含扩展名） */
   name?: string;
+  /**
+   * Ares「Create Urban Areas」开关（原版 exe 没有）：`true` 按面积折算城区数量，
+   * 数字则直接指定数量。缺省不生成。
+   */
+  urbanAreas?: boolean | number;
 }
 
 export interface CxxGlobalOptions {
@@ -152,6 +157,8 @@ export function generateRmgCxx(input: CxxGenerateInput): CxxGenerateResult {
     gameType: clampInt(input.gameType, 0, 1, 0),
     globalSeed,
     mapSeed: 0,
+    urbanAreas: input.urbanAreas === true ? true
+      : typeof input.urbanAreas === 'number' ? Math.max(0, Math.trunc(input.urbanAreas)) : false,
   };
 
   const resourceDir = resolveResourceDir();

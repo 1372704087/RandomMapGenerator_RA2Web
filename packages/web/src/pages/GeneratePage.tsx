@@ -21,8 +21,6 @@ type GenerateRequest = {
   /** 后端接受 boolean，也接受具体的损坏参数（见 server/src/types.ts DamagedBuildingOptions） */
   damagedBuilding: boolean | { min: number; max: number; destroyP: number };
   smudge: number;
-  /** 城区（对齐 Ares Create Urban Areas）：铺街道 + 放城区建筑/平民 */
-  urbanAreas: boolean;
   /** VERA20k 适配：30 人 + 大图（width+height ≤ 1024） */
   vera20k: boolean;
 };
@@ -140,8 +138,6 @@ export default function GeneratePage() {
   const [damageMax, setDamageMax] = useState(50);
   const [destroyP, setDestroyP] = useState(5);
   const [smudge, setSmudge] = useState(0);
-  /** 城区开关：对应 Ares RMG 的 Create Urban Areas */
-  const [urbanAreas, setUrbanAreas] = useState(false);
 
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -394,7 +390,6 @@ export default function GeneratePage() {
       damagedBuilding: damageEnabled ? { min: damageMin, max: damageMax, destroyP } : false,
       totalRandom: isRandom,
       smudge,
-      urbanAreas,
       vera20k
     };
 
@@ -566,21 +561,6 @@ export default function GeneratePage() {
               onChange={handleSmudgeChange}
             />
             <span className="field-hint">范围 {SMUDGE_MIN}-{SMUDGE_MAX}，步进 {SMUDGE_STEP}</span>
-          </div>
-
-          <div className="field">
-            <label className="checkbox-label">
-              <span>生成城区</span>
-              <input
-                id="urbanAreas"
-                type="checkbox"
-                checked={urbanAreas}
-                onChange={e => setUrbanAreas(e.target.checked)}
-              />
-            </label>
-            <span className="field-hint">
-              Ares「Create Urban Areas」：随机位置铺一段街道，并摆放城区战斗建筑 / 载具 / 平民
-            </span>
           </div>
         </div>
       </section>

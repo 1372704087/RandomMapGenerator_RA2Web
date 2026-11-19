@@ -299,6 +299,8 @@ export function generateRmgCxx(payload: {
   playerIndex?: number;
   gameType?: number;
   name?: string;
+  /** Ares Create Urban Areas：true 按面积折算数量，数字直接指定 */
+  urbanAreas?: boolean | number;
 }): Promise<CxxGenerateResult> {
   return postJson<CxxGenerateResult>('/api/rmg/cxx/generate', payload);
 }

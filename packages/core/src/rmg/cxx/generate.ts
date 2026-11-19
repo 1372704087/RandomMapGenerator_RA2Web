@@ -18,6 +18,7 @@ import { addTechBuildings } from './tech';
 import { addTiberium } from './tiberium';
 import { createHills } from './hills';
 import { createLats, pruneTerrainTrees } from './lat';
+import { addUrbanAreas } from './urban';
 import { cleanupStage, computeRadarImage, doneStage, saveMapFile } from './mapFile';
 
 export { Rmg } from './mapGen';
@@ -41,6 +42,11 @@ export interface GenerateParams {
     gameType: number; // 0 single .map / 1 multi .yrm
     globalSeed: number; // the global randomizer seed (exe logs it)
     mapSeed: number; // the map RNG seed (exe keeps 0)
+    /**
+     * Ares `RMG::UrbanAreas` 复选框（原版 exe 没有这个开关）。
+     * `true` 按地图面积折算数量，数字则直接是指定数量，缺省不生成。
+     */
+    urbanAreas?: boolean | number;
 }
 
 export function envToLandType(env: number): LandType {
@@ -135,6 +141,15 @@ export function generateMap(
     addTiberium(rmg); // 0x598EE5 + region teardown
     scanMaxLevel('after-tiberium');
     recalculateCellAttributes(rmg); // 0x598FB8
+    // Ares RMG::UrbanAreas 的挂钩点就在这里：0x598FB8 之后 `CALL(0x5A5020)`
+    // （PlaceUrbanStructures / PlacePavedRoads）。原版关掉这个复选框时什么都不做。
+    if (params.urbanAreas) {
+        const areas = typeof params.urbanAreas === 'number'
+            ? Math.max(0, Math.trunc(params.urbanAreas))
+            : Math.max(1, Math.min(8, Math.round((rmg.size.mapWidth * rmg.size.mapHeight) / 2500)));
+        addUrbanAreas(rmg, { areas });
+    }
+    scanMaxLevel('after-urban');
     recalculateCellAttributes(rmg); // 0x59912A
     scanMaxLevel('after-recalc3');
 

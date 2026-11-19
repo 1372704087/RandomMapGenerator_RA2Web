@@ -1213,3 +1213,5 @@ export function computeRadarImage(r: Rmg): void {
     // The C++ tail writes radar_preview.png through GDI+ (SaveRadarPng);
     // the TS port keeps only the pixel data (available via getRadarImage).
 }
+
+
