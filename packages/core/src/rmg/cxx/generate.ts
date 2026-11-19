@@ -24,6 +24,15 @@ import { cleanupStage, computeRadarImage, doneStage, saveMapFile } from './mapFi
 export { Rmg } from './mapGen';
 export { rollGlobalOptions } from './startpoint';
 
+/**
+ * Ares `Create Urban Areas` 的总开关。
+ *
+ * 2026-11-19 暂时屏蔽：城区生成的效果没通过视觉验收（街道像栅栏、楼位不自然），
+ * 用户要求先关掉。代码与反编译依据都保留，改回 `true` 即可恢复；
+ * 前端（`RmgPage`）的复选框也一起隐藏了，恢复时两处一起改。
+ */
+const URBAN_AREAS_ENABLED = false;
+
 export interface GenerateParams {
     /** UI combo indices (WinMain MapGenParams). */
     environment: number; // 0..4 -> LandType
@@ -143,12 +152,14 @@ export function generateMap(
     recalculateCellAttributes(rmg); // 0x598FB8
     // Ares RMG::UrbanAreas 的挂钩点就在这里：0x598FB8 之后 `CALL(0x5A5020)`
     // （PlaceUrbanStructures / PlacePavedRoads）。原版关掉这个复选框时什么都不做。
-    if (params.urbanAreas) {
+    //
+    // 2026-11-19 暂时屏蔽：效果没验收通过（路像栅栏、楼位不自然），
+    // 这里强制跳过，前端也不再发 urbanAreas。代码保留，改回 true 即可恢复。
+    if (URBAN_AREAS_ENABLED && params.urbanAreas) {
         const areas = typeof params.urbanAreas === 'number'
             ? Math.max(0, Math.trunc(params.urbanAreas))
             : Math.max(8, Math.min(16, Math.round((rmg.size.mapWidth * rmg.size.mapHeight) / 480)));
-        // 用户口径：楼要多、而且遍布全图 —— 所以片区数量按 w*h/700 取（77x85 -> 9 片），
-        // 每片仍是 18..24 的小街坊、只落一两条短街。
+        // 每片 18..24 的小街坊、只落一两条短街，楼按街区 + 全图补充
         addUrbanAreas(rmg, { areas, sizeRange: [18, 24] });
     }
     scanMaxLevel('after-urban');

@@ -19,8 +19,11 @@ export default function RmgPage() {
   const [players, setPlayers] = useState(2); // playerIndex：0 → 2 人 … 6 → 8 人
   const [ore, setOre] = useState(1); // 矿密度 0..3
   const [theater, setTheater] = useState(0); // 0 温带 / 1 雪地 / 2 城市 / 3 沙漠 / 4 新城市 / 5 月球
-  /** Ares Create Urban Areas 开关 */
-  const [urban, setUrban] = useState(false);
+  /**
+   * Ares Create Urban Areas 开关。
+   * 2026-11-19 暂时屏蔽：UI 已隐藏、core 侧强制跳过；恢复时把下面的复选框取消注释。
+   */
+  const [urban] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [result, setResult] = useState<CxxGenerateResult | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -146,6 +149,10 @@ export default function RmgPage() {
               <option value={2}>2</option>
               <option value={3}>3</option>
             </select>
+          {/*
+            城区（Ares Create Urban Areas）2026-11-19 暂时屏蔽：效果未通过验收，
+            core 侧 `URBAN_AREAS_ENABLED = false` 强制跳过，这里连复选框一起隐藏。
+            恢复时把这段取消注释、并把 core 的开关改回 true。
           <div className="field">
             <label className="checkbox-label">
               <input
@@ -160,6 +167,7 @@ export default function RmgPage() {
               两侧按 Ares 默认名单放城区建筑
             </span>
           </div>
+          */}
         </div>
           <button
             type="button"
