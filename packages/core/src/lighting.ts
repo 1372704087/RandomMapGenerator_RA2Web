@@ -111,9 +111,15 @@ const DESERT_BASE: LightingValues = {
   Level: 0.017,
 };
 
-/** 色值夹取范围：太高的通道增益会把贴图颜色推崩，太低则发黑。 */
-const CHANNEL_MIN = 0.2;
+/**
+ * 色值夹取范围：太高的通道增益会把贴图颜色推崩，太低则直接发黑。
+ * 下限放到 0.03 是为了让深夜能真的压黑（原版夜景 A 0.08 这种量级）。
+ */
+const CHANNEL_MIN = 0.03;
 const CHANNEL_MAX = 1.6;
+/** `Level` 的量级完全不同（原版 0.03，夜景脚本 0.001~0.003），单独夹取。 */
+const LEVEL_MIN = 0.001;
+const LEVEL_MAX = 0.2;
 
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
@@ -166,12 +172,45 @@ export function getLightingPreset(
 // ---------------------------------------------------------------------------
 
 /**
- * 四档预设落在一天里的哪几个钟点（游戏光照表本身只有这 4 组，没有中间值）：
- * timeOfDay 3 = 00:00 深夜、0 = 06:00 日出、1 = 12:00 正午、2 = 18:00 黄昏。
- * 在这 4 个锚点之间按时间线性插值，就得到 24 个整点的天色 —— 曲线是闭合的
- * （18:00 → 24:00 接回 00:00），所以 19..23 点会自然落回夜色。
+ * 一天里的锚点（游戏原生光照表只覆盖其中 3 个）：
+ *
+ * | 时刻 | 来源 | Ambient | Red | Green | Blue | Level |
+ * |---|---|---|---|---|---|---|
+ * | 06:00 日出 | 游戏 t0 | 0.75 | 1.09 | 0.80 | 0.49 | 0.03 |
+ * | 12:00 正午 | 游戏 t1 | 1.00 | 1.08 | 0.94 | 0.68 | 0.03 |
+ * | 18:00 黄昏 | 游戏 t2 | 0.75 | 0.71 | 0.81 | 1.19 | 0.03 |
+ * | 19:00 入夜 | 本仓新增 | 0.40 | 0.34 | 0.34 | 0.55 | 0.003 |
+ * | 21:00 夜间 | 本仓新增 | 0.20 | 0.22 | 0.22 | 0.42 | 0.002 |
+ * | 00:00 深夜 | 本仓新增 | 0.08 | 0.13 | 0.13 | 0.24 | 0.0012 |
+ * | 03:00 凌晨 | 本仓新增 | 0.10 | 0.14 | 0.14 | 0.26 | 0.0012 |
+ * | 05:00 黎明 | 本仓新增 | 0.28 | 0.55 | 0.42 | 0.68 | 0.0025 |
+ *
+ * 夜晚段为什么不用游戏自带的 t3（A0.35 / B1.41）？因为那个值实测渲染均值和
+ * 「YR 苏联第 7 关」脚本（A0.55 / R0.4 / G0.4 / B0.7 / Level0.003）差不多亮
+ * （暗像素占比 19% vs 我们的 ~20%），B 通道 1.41 的增益会把暗部整体提亮。
+ * 所以夜晚按「入夜 → 夜间 → 深夜/凌晨 → 黎明」四段压下去：Ambient 压到 0.08，
+ * 蓝色增益从 1.41 收缩到 0.24，Level 同步降到 0.0012，实测深夜均值为第 7 关的
+ * 三分之一左右。
+ *
+ * 非温带（雪地/新城区/岛屿/沙漠）没有自己的夜景，用其正午基准色相对温带正午的
+ * 比例缩放上面这套夜景（雪地偏冷亮、沙漠偏黄），再夹到合法范围。
  */
-const ANCHOR_HOURS = [0, 6, 12, 18, 24] as const;
+interface HourAnchor {
+  hour: number;
+  values: LightingValues;
+}
+
+/** 温带夜景（键是钟点）。 */
+const TEMPERATE_NIGHT: Record<number, LightingValues> = {
+  0: { Ambient: 0.08, Red: 0.13, Green: 0.13, Blue: 0.24, Level: 0.0012 },
+  3: { Ambient: 0.1, Red: 0.14, Green: 0.14, Blue: 0.26, Level: 0.0012 },
+  5: { Ambient: 0.28, Red: 0.55, Green: 0.42, Blue: 0.68, Level: 0.0025 },
+  19: { Ambient: 0.4, Red: 0.34, Green: 0.34, Blue: 0.55, Level: 0.003 },
+  21: { Ambient: 0.2, Red: 0.22, Green: 0.22, Blue: 0.42, Level: 0.002 },
+};
+
+/** 锚点钟点（升序；24 表示闭合回 00:00）。 */
+const ANCHOR_HOURS = [0, 3, 5, 6, 12, 18, 19, 21, 24] as const;
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -190,42 +229,77 @@ export const HOUR_LABELS: Record<number, string> = {
 /** 所有可选整点（0..23）。 */
 export const LIGHTING_HOURS: readonly number[] = Array.from({ length: 24 }, (_, i) => i);
 
-/** 每个整点在四个锚点里的位置（返回锚点数组下标 0..3 与段内比例 t）。 */
-function hourToSegment(hour: number): { index: number; t: number } {
+/** 某个环境的夜景：把温带夜景按「本环境正午 / 温带正午」的通道比例缩放。 */
+function nightOf(environment: LightingEnvironment): Record<number, LightingValues> {
+  if (environment === 'temperate') return TEMPERATE_NIGHT;
+  const noon = TABLES[environment]?.[1] ?? TEMPERATE_TABLE[1];
+  const ratio = {
+    Ambient: noon.Ambient / TEMPERATE_TABLE[1].Ambient,
+    Red: noon.Red / TEMPERATE_TABLE[1].Red,
+    Green: noon.Green / TEMPERATE_TABLE[1].Green,
+    Blue: noon.Blue / TEMPERATE_TABLE[1].Blue,
+  };
+  const out: Record<number, LightingValues> = {};
+  for (const [hour, v] of Object.entries(TEMPERATE_NIGHT)) {
+    out[Number(hour)] = {
+      Ambient: round6(clamp(v.Ambient * ratio.Ambient, CHANNEL_MIN, CHANNEL_MAX)),
+      Red: round6(clamp(v.Red * ratio.Red, CHANNEL_MIN, CHANNEL_MAX)),
+      Green: round6(clamp(v.Green * ratio.Green, CHANNEL_MIN, CHANNEL_MAX)),
+      Blue: round6(clamp(v.Blue * ratio.Blue, CHANNEL_MIN, CHANNEL_MAX)),
+      Level: v.Level,
+    };
+  }
+  return out;
+}
+
+/** 某个环境的完整锚点链（9 个锚点，按钟点升序）。 */
+function anchorsOf(environment: LightingEnvironment): HourAnchor[] {
+  const table = TABLES[environment] ?? TEMPERATE_TABLE;
+  const night = nightOf(environment);
+  return ANCHOR_HOURS.map((hour) => {
+    if (hour === 24) {
+      return { hour, values: { ...night[0] } };
+    }
+    if (hour === 6) return { hour, values: { ...table[0] } };
+    if (hour === 12) return { hour, values: { ...table[1] } };
+    if (hour === 18) return { hour, values: { ...table[2] } };
+    return { hour, values: { ...night[hour] } };
+  });
+}
+
+/** 找出整点落在哪一段锚点之间。 */
+function hourToSegment(
+  anchors: HourAnchor[],
+  hour: number,
+): { index: number; t: number } {
   const h = ((Math.round(hour) % 24) + 24) % 24;
   let index = 0;
-  while (index < 3 && h >= ANCHOR_HOURS[index + 1]) {
+  while (index < anchors.length - 2 && h >= anchors[index + 1].hour) {
     index += 1;
   }
-  const span = ANCHOR_HOURS[index + 1] - ANCHOR_HOURS[index];
-  const t = span === 0 ? 0 : (h - ANCHOR_HOURS[index]) / span;
+  const span = anchors[index + 1].hour - anchors[index].hour;
+  const t = span === 0 ? 0 : (h - anchors[index].hour) / span;
   return { index, t };
 }
 
-/** 某个环境的锚点曲线（顺序：00:00、06:00、12:00、18:00、24:00=00:00）。 */
-function curveOf(environment: LightingEnvironment): LightingValues[] {
-  const table = TABLES[environment] ?? TEMPERATE_TABLE;
-  return [table[3], table[0], table[1], table[2], table[3]];
-}
-
 /**
- * 取某个环境 + 某个整点（0..23）的光照值：四个实测锚点之间线性插值。
- * 整点正落在锚点上时与 `getLightingPreset` 完全一致。
+ * 取某个环境 + 某个整点（0..23）的光照值：在 9 个锚点之间线性插值。
+ * 锚点上的取值就是该锚点的定义值（06:00/12:00/18:00 与游戏四档逐位相同）。
  */
 export function getLightingForHour(
   environment: LightingEnvironment,
   hour: number,
 ): LightingValues {
-  const curve = curveOf(environment);
-  const { index, t } = hourToSegment(hour);
-  const a = curve[index];
-  const b = curve[index + 1];
+  const anchors = anchorsOf(environment);
+  const { index, t } = hourToSegment(anchors, hour);
+  const a = anchors[index].values;
+  const b = anchors[index + 1].values;
   return {
     Ambient: round6(clamp(lerp(a.Ambient, b.Ambient, t), CHANNEL_MIN, CHANNEL_MAX)),
     Red: round6(clamp(lerp(a.Red, b.Red, t), CHANNEL_MIN, CHANNEL_MAX)),
     Green: round6(clamp(lerp(a.Green, b.Green, t), CHANNEL_MIN, CHANNEL_MAX)),
     Blue: round6(clamp(lerp(a.Blue, b.Blue, t), CHANNEL_MIN, CHANNEL_MAX)),
-    Level: round6(lerp(a.Level, b.Level, t)),
+    Level: round6(clamp(lerp(a.Level, b.Level, t), LEVEL_MIN, LEVEL_MAX)),
   };
 }
 
@@ -256,25 +330,30 @@ export function applyLightingOverrides(
   const result: LightingValues = { ...base };
   if (!overrides) return result;
 
-  const coreKeys: (keyof LightingValues)[] = ['Ambient', 'Red', 'Green', 'Blue', 'Level'];
+  const coreKeys: (keyof LightingValues)[] = ['Ambient', 'Red', 'Green', 'Blue'];
   for (const key of coreKeys) {
     const v = overrides[key];
     if (typeof v === 'number' && Number.isFinite(v)) {
       result[key] = round6(clamp(v, CHANNEL_MIN, CHANNEL_MAX));
     }
   }
+  if (typeof overrides.Level === 'number' && Number.isFinite(overrides.Level)) {
+    result.Level = round6(clamp(overrides.Level, LEVEL_MIN, LEVEL_MAX));
+  }
   const ionKeys: (keyof LightingValues)[] = [
     'IonAmbient',
     'IonRed',
     'IonGreen',
     'IonBlue',
-    'IonLevel',
   ];
   for (const key of ionKeys) {
     const v = overrides[key];
     if (typeof v === 'number' && Number.isFinite(v)) {
       result[key] = round6(clamp(v, CHANNEL_MIN, CHANNEL_MAX));
     }
+  }
+  if (typeof overrides.IonLevel === 'number' && Number.isFinite(overrides.IonLevel)) {
+    result.IonLevel = round6(clamp(overrides.IonLevel, LEVEL_MIN, LEVEL_MAX));
   }
   return result;
 }
@@ -297,7 +376,7 @@ export function jitterLighting(
     Red: round6(clamp(base.Red * wobble(), CHANNEL_MIN, CHANNEL_MAX)),
     Green: round6(clamp(base.Green * wobble(), CHANNEL_MIN, CHANNEL_MAX)),
     Blue: round6(clamp(base.Blue * wobble(), CHANNEL_MIN, CHANNEL_MAX)),
-    Level: round6(clamp(base.Level * wobble(), 0.001, 0.2)),
+    Level: round6(clamp(base.Level * wobble(), LEVEL_MIN, LEVEL_MAX)),
   };
   if (base.IonAmbient !== undefined) {
     result.IonAmbient = round6(clamp(base.IonAmbient * wobble(), CHANNEL_MIN, CHANNEL_MAX));
@@ -312,7 +391,7 @@ export function jitterLighting(
     result.IonBlue = round6(clamp(base.IonBlue * wobble(), CHANNEL_MIN, CHANNEL_MAX));
   }
   if (base.IonLevel !== undefined) {
-    result.IonLevel = round6(clamp(base.IonLevel * wobble(), 0.001, 0.2));
+    result.IonLevel = round6(clamp(base.IonLevel * wobble(), LEVEL_MIN, LEVEL_MAX));
   }
   return result;
 }

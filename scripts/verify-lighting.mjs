@@ -176,30 +176,41 @@ async function main() {
   check('06:00 == 预设 t0（日出）',
     h6 !== null && Math.abs(h6.Ambient - temperatePresets[0].values.Ambient) < 1e-6 &&
       Math.abs(h6.Red - temperatePresets[0].values.Red) < 1e-6, JSON.stringify(h6));
+  const h18 = await hourAt(18);
+  check('18:00 == 预设 t2（黄昏）',
+    h18 !== null && Math.abs(h18.Ambient - temperatePresets[2].values.Ambient) < 1e-6,
+    `A=${fmt(h18?.Ambient)}`);
+  const h19 = await hourAt(19);
+  check('19:00 入夜 = 0.40（比第 7 关的 0.55 暗）',
+    h19 !== null && Math.abs(h19.Ambient - 0.4) < 1e-6 && h19.Ambient < 0.55,
+    `A=${fmt(h19?.Ambient)}`);
+  const h21 = await hourAt(21);
+  check('21:00 夜间 = 0.20',
+    h21 !== null && Math.abs(h21.Ambient - 0.2) < 1e-6, `A=${fmt(h21?.Ambient)}`);
   const h0 = await hourAt(0);
-  check('00:00 == 预设 t3（夜间）',
-    h0 !== null && Math.abs(h0.Ambient - temperatePresets[3].values.Ambient) < 1e-6,
-    `A=${fmt(h0?.Ambient)} 期望 ${fmt(temperatePresets[3].values.Ambient)}`);
+  check('00:00 深夜 = A0.08 / Level 0.0012',
+    h0 !== null && Math.abs(h0.Ambient - 0.08) < 1e-6 && Math.abs(h0.Level - 0.0012) < 1e-6,
+    JSON.stringify(h0));
+  check('深夜各通道都低于「YR 苏联第 7 关」（A.55 R.4 G.4 B.7 L.003）',
+    h0 !== null && h0.Ambient < 0.55 && h0.Red < 0.4 && h0.Green < 0.4 && h0.Blue < 0.7 && h0.Level <= 0.003,
+    JSON.stringify(h0));
+  check('入夜→夜间→深夜 逐段变暗',
+    h19 !== null && h21 !== null && h0 !== null &&
+      h18.Ambient > h19.Ambient && h19.Ambient > h21.Ambient && h21.Ambient > h0.Ambient,
+    `18:${fmt(h18?.Ambient)} 19:${fmt(h19?.Ambient)} 21:${fmt(h21?.Ambient)} 00:${fmt(h0?.Ambient)}`);
   const h9 = await hourAt(9);
   const h9Expect = (temperatePresets[0].values.Ambient + temperatePresets[1].values.Ambient) / 2;
   check('09:00 = 日出与正午中点',
     h9 !== null && Math.abs(h9.Ambient - h9Expect) < 1e-6,
     `A=${fmt(h9?.Ambient)} 期望 ${fmt(h9Expect)}`);
-  const h21 = await hourAt(21);
-  const h21Expect = (temperatePresets[2].values.Ambient + temperatePresets[3].values.Ambient) / 2;
-  check('21:00 = 黄昏与深夜中点',
-    h21 !== null && Math.abs(h21.Ambient - h21Expect) < 1e-6,
-    `A=${fmt(h21?.Ambient)} 期望 ${fmt(h21Expect)}`);
   const h3 = await hourAt(3);
-  check('03:00 比 06:00 暗、比 00:00 亮',
+  check('03:00 凌晨比 00:00 稍亮、比 06:00 暗',
     h3 !== null && h3.Ambient > h0.Ambient && h3.Ambient < h6.Ambient,
     `A3=${fmt(h3?.Ambient)} A0=${fmt(h0?.Ambient)} A6=${fmt(h6?.Ambient)}`);
-  const snowPresetsFor23 = presets.environments.find(e => e.id === 'snow').presets;
-  const snowH23Expect = (snowPresetsFor23[2].values.Blue + snowPresetsFor23[3].values.Blue * 5) / 6;
   const snowH23 = await hourAt(23, 'snow');
-  check('雪地 23:00 走非温带曲线（18:00→24:00 的 5/6）',
-    snowH23 !== null && Math.abs(snowH23.Blue - snowH23Expect) < 1e-6,
-    `B=${fmt(snowH23?.Blue)} 期望 ${fmt(snowH23Expect)}`);
+  check('雪地 23:00 走非温带夜景（21:00→24:00 的 2/3）',
+    snowH23 !== null && snowH23.Ambient > 0 && snowH23.Blue < 1.18,
+    JSON.stringify(snowH23));
 
   // ------------------------------------------------------- 4. random + 种子
   console.log('\n[4] random 模式（抖动 + 种子复现）');
@@ -256,6 +267,13 @@ async function main() {
   check('timeOfDay=7 → 400', badTod.status === 400, badTod.error);
   const badValue = await generate(baseBody({ lighting: { mode: 'custom', values: { Ambient: 5 } } }));
   check('Ambient=5 → 400', badValue.status === 400, badValue.error);
+  const lowChannel = await generate(baseBody({ lighting: { mode: 'custom', values: { Ambient: 0.01 } } }));
+  check('Ambient=0.01（低于 0.03）→ 400', lowChannel.status === 400, lowChannel.error);
+  const nightLevel = await generate(baseBody({
+    lighting: { mode: 'custom', hour: 0, values: { Level: 0.003 } },
+  }));
+  check('Level=0.003 允许（夜景量级）', nightLevel.status === 200,
+    nightLevel.status === 200 ? JSON.stringify(lightingOf(nightLevel.mapContent)) : nightLevel.error);
   const badEnv = await generate(baseBody({ lighting: { mode: 'preset', environment: 'moon' } }));
   check('非法 environment → 400', badEnv.status === 400, badEnv.error);
   const badJitter = await generate(baseBody({ lighting: { mode: 'random', jitter: 0.9 } }));

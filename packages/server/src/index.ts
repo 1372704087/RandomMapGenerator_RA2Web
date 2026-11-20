@@ -810,13 +810,12 @@ function validateLightingRequest(lighting: LightingRequest | undefined): string 
         return `lighting.values.${key} is not a known channel (${valueKeys.join(', ')})`;
       }
       const v = (lighting.values as Record<string, unknown>)[key];
-      if (
-        typeof v !== 'number' ||
-        !Number.isFinite(v) ||
-        v < 0.2 ||
-        v > 1.6
-      ) {
-        return `lighting.values.${key} must be a number between 0.2 and 1.6`;
+      // Level 的量级和颜色通道不同：原版 0.03，夜景脚本 0.001~0.003
+      const isLevel = key === 'Level' || key === 'IonLevel';
+      const min = isLevel ? 0.001 : 0.03;
+      const max = isLevel ? 0.2 : 1.6;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) {
+        return `lighting.values.${key} must be a number between ${min} and ${max}`;
       }
     }
   }

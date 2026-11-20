@@ -112,11 +112,21 @@ describe('自定义覆盖', () => {
     assert.equal(out.Level, base.Level);
   });
 
-  it('越界值被夹到 0.2..1.6', () => {
+  it('颜色通道越界值被夹到 0.03..1.6', () => {
     const base = getLightingPreset('temperate', 1);
     const out = applyLightingOverrides(base, { Ambient: 9, Blue: -3 });
     assert.equal(out.Ambient, 1.6);
-    assert.equal(out.Blue, 0.2);
+    assert.equal(out.Blue, 0.03);
+  });
+
+  it('Level 走自己的量级（0.001..0.2），不被颜色通道下限卡住', () => {
+    const base = getLightingPreset('temperate', 1);
+    const out = applyLightingOverrides(base, { Level: 0.003 });
+    assert.equal(out.Level, 0.003);
+    const clamped = applyLightingOverrides(base, { Level: 0.0001 });
+    assert.equal(clamped.Level, 0.001);
+    const high = applyLightingOverrides(base, { Level: 5 });
+    assert.equal(high.Level, 0.2);
   });
 
   it('Ion 通道可单独覆盖', () => {
@@ -168,9 +178,8 @@ describe('随机抖动', () => {
 });
 
 describe('整点小时曲线', () => {
-  it('锚点上与四档预设逐位一致（温带）', () => {
-    const pairs: [number, 0 | 1 | 2 | 3][] = [
-      [0, 3],
+  it('白天的三个锚点与游戏四档逐位一致（温带）', () => {
+    const pairs: [number, 0 | 1 | 2][] = [
       [6, 0],
       [12, 1],
       [18, 2],
@@ -180,13 +189,12 @@ describe('整点小时曲线', () => {
     }
   });
 
-  it('锚点上与四档预设逐位一致（雪地）', () => {
+  it('白天的三个锚点与游戏四档逐位一致（雪地）', () => {
     for (const [hour, tod] of [
-      [0, 3],
       [6, 0],
       [12, 1],
       [18, 2],
-    ] as [number, 0 | 1 | 2 | 3][]) {
+    ] as [number, 0 | 1 | 2][]) {
       assert.deepEqual(getLightingForHour('snow', hour), getLightingPreset('snow', tod));
     }
   });
@@ -200,18 +208,33 @@ describe('整点小时曲线', () => {
     assert.equal(v.Blue, (sunrise.Blue + noon.Blue) / 2);
   });
 
-  it('03:00 是深夜与日出的中点', () => {
-    const night = getLightingPreset('temperate', 3);
-    const sunrise = getLightingPreset('temperate', 0);
-    const v = getLightingForHour('temperate', 3);
-    assert.equal(v.Ambient, (night.Ambient + sunrise.Ambient) / 2);
+  it('夜晚四段锚点按「入夜→夜间→深夜→黎明」压暗', () => {
+    const dusk = getLightingForHour('temperate', 18);
+    const evening = getLightingForHour('temperate', 19);
+    const night = getLightingForHour('temperate', 21);
+    const midnight = getLightingForHour('temperate', 0);
+    const dawn = getLightingForHour('temperate', 5);
+    const sunrise = getLightingForHour('temperate', 6);
+    assert.ok(evening.Ambient < dusk.Ambient, '19:00 应比 18:00 暗');
+    assert.ok(night.Ambient < evening.Ambient, '21:00 应比 19:00 暗');
+    assert.ok(midnight.Ambient < night.Ambient, '00:00 应比 21:00 暗');
+    assert.ok(dawn.Ambient > midnight.Ambient, '05:00 黎明应回升');
+    assert.ok(sunrise.Ambient > dawn.Ambient, '06:00 日出更亮');
   });
 
-  it('21:00 是黄昏与深夜的中点', () => {
-    const dusk = getLightingPreset('temperate', 2);
-    const night = getLightingPreset('temperate', 3);
-    const v = getLightingForHour('temperate', 21);
-    assert.equal(v.Ambient, (dusk.Ambient + night.Ambient) / 2);
+  it('深夜比「YR 苏联第 7 关」参考光照更暗', () => {
+    // 第 7 关脚本：Ambient 0.55 / Red .4 / Green .4 / Blue .7 / Level 0.003
+    const midnight = getLightingForHour('temperate', 0);
+    assert.ok(midnight.Ambient < 0.55, `Ambient ${midnight.Ambient}`);
+    assert.ok(midnight.Red < 0.4 && midnight.Green < 0.4 && midnight.Blue < 0.7);
+    assert.ok(midnight.Level <= 0.003, `Level ${midnight.Level}`);
+    const evening = getLightingForHour('temperate', 19);
+    assert.ok(evening.Ambient < 0.55, '入夜也应比第 7 关暗');
+  });
+
+  it('深夜的蓝色增益不再放大（旧版 1.41 导致暗部发亮）', () => {
+    const midnight = getLightingForHour('temperate', 0);
+    assert.ok(midnight.Blue < 0.5, `Blue=${midnight.Blue}`);
   });
 
   it('曲线闭合：0 点与 24 点相同', () => {
@@ -234,13 +257,14 @@ describe('整点小时曲线', () => {
     assert.equal(getHourLabel(-1), getHourLabel(23));
   });
 
-  it('每个整点的通道都夹在 0.2..1.6', () => {
+  it('每个整点的通道都夹在 0.03..1.6', () => {
     for (const env of ['temperate', 'snow', 'desert', 'newurban', 'islands'] as const) {
       for (let h = 0; h < 24; h++) {
         const v = getLightingForHour(env, h);
         for (const key of ['Ambient', 'Red', 'Green', 'Blue'] as const) {
-          assert.ok(v[key] >= 0.2 && v[key] <= 1.6, `${env} ${h}:00 ${key}=${v[key]} 越界`);
+          assert.ok(v[key] >= 0.03 && v[key] <= 1.6, `${env} ${h}:00 ${key}=${v[key]} 越界`);
         }
+        assert.ok(v.Level >= 0.001 && v.Level <= 0.2, `${env} ${h}:00 Level=${v.Level} 越界`);
       }
     }
   });

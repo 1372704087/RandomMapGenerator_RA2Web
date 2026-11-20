@@ -120,7 +120,7 @@ packages/
 - 城区生成（对齐 Ares 的 Create Urban Areas，挂在**原版 RMG 管线**）：`POST /api/rmg/cxx/generate` 传 `urbanAreas: true`（或数字=城区数量），按 gamemd `0x5A5020` 的顺序每区跑最多 10 轮「长路径（`0x5A5360`）→ 取包围盒 → 10 格步进铺**街道栅格**（`Proad` 多格图块逐子格盖章 + 中隔 + 两端 `p_end` 端头）」→ 街区里放城区建筑 → 车道上放载具、街边放步兵（写出 `[Units]` / `[Infantry]`）；规则见 [`re/specs/URBAN_AREAS.md`](re/specs/URBAN_AREAS.md)
 - 自动生成缩略图预览
 - 完全随机模式 / 手动配置模式
-- 环境光照（`POST /api/generate` 的 `lighting`）：四档时段（暖光/正午/冷调/夜间）× 五套环境主题（温带/雪地/沙漠/新城市/岛屿），可 `preset` 写死、`random` 受种子约束抖动、`custom` 改单条通道；不传则保持原版行为（只有沙漠随机写 `[Lighting]`）。规则与实测见 [`re/specs/LIGHTING.md`](re/specs/LIGHTING.md)
+- 环境光照（`POST /api/generate` 的 `lighting`）：24 个整点时刻 × 五套环境主题（温带/雪地/沙漠/新城市/岛屿），可 `preset` 写死、`random` 受种子约束抖动、`custom` 改单条通道；夜晚按「入夜→夜间→深夜→黎明」压暗（比 YR 苏联第 7 关的夜景更黑），不传则保持原版行为（只有沙漠随机写 `[Lighting]`）。规则与实测见 [`re/specs/LIGHTING.md`](re/specs/LIGHTING.md)
 - 随机种子（`seed` + `X-Map-Seed` 回显）：同种子 ⇒ 逐字节相同的地图，见 [`re/specs/SEED_REPRO.md`](re/specs/SEED_REPRO.md)
 
 ## MapUnit 资源规范
