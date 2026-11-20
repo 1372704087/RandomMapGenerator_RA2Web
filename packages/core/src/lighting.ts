@@ -27,6 +27,10 @@
  * 所以这里用沙漠 settings.ini 的中值（R .98 / G .955 / B .955 / A .875 / L .017）
  * 作为“正午基准色”，再套上面温带表的相对比例缩放出四个时段，保留沙漠本身偏黄
  * 的底色。派生结果会夹到 0.2..1.6 之间，避免夜间蓝通道被推到不合理的 1.98。
+ *
+ * 四档之外还提供「整点」曲线（`getLightingForHour`）：把 4 组实测值按
+ * 00:00 / 06:00 / 12:00 / 18:00 摆成一条闭合日照曲线，中间整点线性插值，
+ * 于是 24 个整点都能选，而锚点上的取值与四档预设逐位相同。
  */
 
 import { Random } from './random';
@@ -155,6 +159,80 @@ export function getLightingPreset(
 ): LightingValues {
   const table = TABLES[environment] ?? TEMPERATE_TABLE;
   return { ...table[timeOfDay] };
+}
+
+// ---------------------------------------------------------------------------
+// 整点小时曲线
+// ---------------------------------------------------------------------------
+
+/**
+ * 四档预设落在一天里的哪几个钟点（游戏光照表本身只有这 4 组，没有中间值）：
+ * timeOfDay 3 = 00:00 深夜、0 = 06:00 日出、1 = 12:00 正午、2 = 18:00 黄昏。
+ * 在这 4 个锚点之间按时间线性插值，就得到 24 个整点的天色 —— 曲线是闭合的
+ * （18:00 → 24:00 接回 00:00），所以 19..23 点会自然落回夜色。
+ */
+const ANCHOR_HOURS = [0, 6, 12, 18, 24] as const;
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/** 24 个整点的中文时段名（前端下拉标签）。 */
+export const HOUR_LABELS: Record<number, string> = {
+  0: '00:00 深夜', 1: '01:00 深夜', 2: '02:00 凌晨', 3: '03:00 凌晨',
+  4: '04:00 黎明前', 5: '05:00 黎明', 6: '06:00 日出', 7: '07:00 清晨',
+  8: '08:00 清晨', 9: '09:00 上午', 10: '10:00 上午', 11: '11:00 上午',
+  12: '12:00 正午', 13: '13:00 下午', 14: '14:00 下午', 15: '15:00 下午',
+  16: '16:00 傍晚', 17: '17:00 傍晚', 18: '18:00 黄昏', 19: '19:00 入夜',
+  20: '20:00 入夜', 21: '21:00 夜间', 22: '22:00 夜间', 23: '23:00 深夜',
+};
+
+/** 所有可选整点（0..23）。 */
+export const LIGHTING_HOURS: readonly number[] = Array.from({ length: 24 }, (_, i) => i);
+
+/** 每个整点在四个锚点里的位置（返回锚点数组下标 0..3 与段内比例 t）。 */
+function hourToSegment(hour: number): { index: number; t: number } {
+  const h = ((Math.round(hour) % 24) + 24) % 24;
+  let index = 0;
+  while (index < 3 && h >= ANCHOR_HOURS[index + 1]) {
+    index += 1;
+  }
+  const span = ANCHOR_HOURS[index + 1] - ANCHOR_HOURS[index];
+  const t = span === 0 ? 0 : (h - ANCHOR_HOURS[index]) / span;
+  return { index, t };
+}
+
+/** 某个环境的锚点曲线（顺序：00:00、06:00、12:00、18:00、24:00=00:00）。 */
+function curveOf(environment: LightingEnvironment): LightingValues[] {
+  const table = TABLES[environment] ?? TEMPERATE_TABLE;
+  return [table[3], table[0], table[1], table[2], table[3]];
+}
+
+/**
+ * 取某个环境 + 某个整点（0..23）的光照值：四个实测锚点之间线性插值。
+ * 整点正落在锚点上时与 `getLightingPreset` 完全一致。
+ */
+export function getLightingForHour(
+  environment: LightingEnvironment,
+  hour: number,
+): LightingValues {
+  const curve = curveOf(environment);
+  const { index, t } = hourToSegment(hour);
+  const a = curve[index];
+  const b = curve[index + 1];
+  return {
+    Ambient: round6(clamp(lerp(a.Ambient, b.Ambient, t), CHANNEL_MIN, CHANNEL_MAX)),
+    Red: round6(clamp(lerp(a.Red, b.Red, t), CHANNEL_MIN, CHANNEL_MAX)),
+    Green: round6(clamp(lerp(a.Green, b.Green, t), CHANNEL_MIN, CHANNEL_MAX)),
+    Blue: round6(clamp(lerp(a.Blue, b.Blue, t), CHANNEL_MIN, CHANNEL_MAX)),
+    Level: round6(lerp(a.Level, b.Level, t)),
+  };
+}
+
+/** 整点标签；越界时裁到 0..23。 */
+export function getHourLabel(hour: number): string {
+  const h = ((Math.round(hour) % 24) + 24) % 24;
+  return HOUR_LABELS[h];
 }
 
 /** 把 theater 目录名（TEMPERATE / SNOW / DESERT / NEWURBAN / TEMPERATE_Islands）映射到环境主题。 */

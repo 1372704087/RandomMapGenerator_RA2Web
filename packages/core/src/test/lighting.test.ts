@@ -14,6 +14,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getLightingPreset,
+  getLightingForHour,
+  getHourLabel,
+  LIGHTING_HOURS,
   applyLightingOverrides,
   jitterLighting,
   theaterToLightingEnvironment,
@@ -161,6 +164,89 @@ describe('随机抖动', () => {
     assert.equal(v.Ambient, base.Ambient);
     assert.equal(v.Red, base.Red);
     assert.equal(v.Blue, base.Blue);
+  });
+});
+
+describe('整点小时曲线', () => {
+  it('锚点上与四档预设逐位一致（温带）', () => {
+    const pairs: [number, 0 | 1 | 2 | 3][] = [
+      [0, 3],
+      [6, 0],
+      [12, 1],
+      [18, 2],
+    ];
+    for (const [hour, tod] of pairs) {
+      assert.deepEqual(getLightingForHour('temperate', hour), getLightingPreset('temperate', tod));
+    }
+  });
+
+  it('锚点上与四档预设逐位一致（雪地）', () => {
+    for (const [hour, tod] of [
+      [0, 3],
+      [6, 0],
+      [12, 1],
+      [18, 2],
+    ] as [number, 0 | 1 | 2 | 3][]) {
+      assert.deepEqual(getLightingForHour('snow', hour), getLightingPreset('snow', tod));
+    }
+  });
+
+  it('09:00 是日出与正午的中点', () => {
+    const sunrise = getLightingPreset('temperate', 0);
+    const noon = getLightingPreset('temperate', 1);
+    const v = getLightingForHour('temperate', 9);
+    assert.equal(v.Ambient, (sunrise.Ambient + noon.Ambient) / 2);
+    assert.equal(v.Red, (sunrise.Red + noon.Red) / 2);
+    assert.equal(v.Blue, (sunrise.Blue + noon.Blue) / 2);
+  });
+
+  it('03:00 是深夜与日出的中点', () => {
+    const night = getLightingPreset('temperate', 3);
+    const sunrise = getLightingPreset('temperate', 0);
+    const v = getLightingForHour('temperate', 3);
+    assert.equal(v.Ambient, (night.Ambient + sunrise.Ambient) / 2);
+  });
+
+  it('21:00 是黄昏与深夜的中点', () => {
+    const dusk = getLightingPreset('temperate', 2);
+    const night = getLightingPreset('temperate', 3);
+    const v = getLightingForHour('temperate', 21);
+    assert.equal(v.Ambient, (dusk.Ambient + night.Ambient) / 2);
+  });
+
+  it('曲线闭合：0 点与 24 点相同', () => {
+    assert.deepEqual(getLightingForHour('temperate', 0), getLightingForHour('temperate', 24));
+  });
+
+  it('白天整体比夜里亮（环境光单调区间）', () => {
+    const noon = getLightingForHour('temperate', 12);
+    const midnight = getLightingForHour('temperate', 0);
+    const dawn = getLightingForHour('temperate', 6);
+    assert.ok(noon.Ambient > dawn.Ambient);
+    assert.ok(dawn.Ambient > midnight.Ambient);
+  });
+
+  it('24 个整点都有标签，越界自动绕回', () => {
+    for (let h = 0; h < 24; h++) {
+      assert.ok(getHourLabel(h).length > 0, `hour ${h} 无标签`);
+    }
+    assert.equal(getHourLabel(25), getHourLabel(1));
+    assert.equal(getHourLabel(-1), getHourLabel(23));
+  });
+
+  it('每个整点的通道都夹在 0.2..1.6', () => {
+    for (const env of ['temperate', 'snow', 'desert', 'newurban', 'islands'] as const) {
+      for (let h = 0; h < 24; h++) {
+        const v = getLightingForHour(env, h);
+        for (const key of ['Ambient', 'Red', 'Green', 'Blue'] as const) {
+          assert.ok(v[key] >= 0.2 && v[key] <= 1.6, `${env} ${h}:00 ${key}=${v[key]} 越界`);
+        }
+      }
+    }
+  });
+
+  it('LIGHTING_HOURS 恰好是 0..23', () => {
+    assert.deepEqual(LIGHTING_HOURS, Array.from({ length: 24 }, (_, i) => i));
   });
 });
 

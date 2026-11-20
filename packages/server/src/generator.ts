@@ -20,6 +20,7 @@ import {
   TimeOfDay,
   LightingEnvironment,
   getLightingPreset,
+  getLightingForHour,
   applyLightingOverrides,
   jitterLighting,
   theaterToLightingEnvironment,
@@ -71,7 +72,12 @@ function applyLighting(
   const environment: LightingEnvironment =
     request?.environment ?? theaterToLightingEnvironment(theater.name);
   const timeOfDay = (request?.timeOfDay ?? 1) as TimeOfDay;
-  let values: LightingValues = getLightingPreset(environment, timeOfDay);
+  // 给了 hour（0..23）就按整点曲线取，否则用四档预设（hour 优先）
+  const hour = typeof request?.hour === 'number' ? request.hour : undefined;
+  let values: LightingValues =
+    hour === undefined
+      ? getLightingPreset(environment, timeOfDay)
+      : getLightingForHour(environment, hour);
 
   if (mode === 'random') {
     values = jitterLighting(values, request?.jitter ?? 0.08, mapFile.Randomizer);
@@ -82,7 +88,7 @@ function applyLighting(
 
   return {
     iniContent: mapFile.ChangeLighting(iniContent, values),
-    lighting: { mode, environment, timeOfDay, values: { ...values } },
+    lighting: { mode, environment, timeOfDay, hour, values: { ...values } },
   };
 }
 

@@ -90,12 +90,20 @@ async function main() {
   check('每个环境 4 档时段',
     presets.environments.every(e => e.presets.length === 4),
     presets.environments.map(e => `${e.id}:${e.presets.length}`).join(' '));
+  check('每个环境都有 24 整点', presets.environments.every(e => e.hourly.length === 24),
+    presets.environments.map(e => `${e.id}:${e.hourly?.length}`).join(' '));
+  check('hours 列表 24 项', presets.hours?.length === 24, `实际 ${presets.hours?.length}`);
   for (const env of presets.environments) {
     const row = env.presets
       .map(p => `t${p.timeOfDay} A${fmt(p.values.Ambient)} R${fmt(p.values.Red)} G${fmt(p.values.Green)} B${fmt(p.values.Blue)}`)
       .join(' | ');
     console.log(`    ${env.id.padEnd(10)} ${row}`);
   }
+  const temperateHourly = presets.environments.find(e => e.id === 'temperate').hourly;
+  console.log('    temperate 逐 3 小时：' +
+    temperateHourly.filter(h => h.hour % 3 === 0)
+      .map(h => `${String(h.hour).padStart(2, '0')}:00 A${fmt(h.values.Ambient)} R${fmt(h.values.Red)} G${fmt(h.values.Green)} B${fmt(h.values.Blue)}`)
+      .join(' | '));
 
   // ------------------------------------------------------- 2. auto 行为（原版）
   console.log('\n[2] auto 模式（不传 lighting）');
@@ -153,6 +161,45 @@ async function main() {
   check('environment 可显式覆盖（温带图用沙漠色）',
     forcedValues !== null && Math.abs(forcedValues.Red - desertPreset.Red) < 1e-6,
     `R=${fmt(forcedValues?.Red)} 期望 ${fmt(desertPreset.Red)}`);
+
+  // ------------------------------------------------------- 3.5 整点小时
+  console.log('\n[3.5] hour 模式（24 整点插值）');
+  const hourAt = async (hour, env = 'temperate') => {
+    const r = await generate(baseBody({
+      theaterType: env === 'temperate' ? 'TEMPERATE' : 'SNOW',
+      seed: 7,
+      lighting: { mode: 'preset', hour, environment: env },
+    }));
+    return lightingOf(r.mapContent);
+  };
+  const h6 = await hourAt(6);
+  check('06:00 == 预设 t0（日出）',
+    h6 !== null && Math.abs(h6.Ambient - temperatePresets[0].values.Ambient) < 1e-6 &&
+      Math.abs(h6.Red - temperatePresets[0].values.Red) < 1e-6, JSON.stringify(h6));
+  const h0 = await hourAt(0);
+  check('00:00 == 预设 t3（夜间）',
+    h0 !== null && Math.abs(h0.Ambient - temperatePresets[3].values.Ambient) < 1e-6,
+    `A=${fmt(h0?.Ambient)} 期望 ${fmt(temperatePresets[3].values.Ambient)}`);
+  const h9 = await hourAt(9);
+  const h9Expect = (temperatePresets[0].values.Ambient + temperatePresets[1].values.Ambient) / 2;
+  check('09:00 = 日出与正午中点',
+    h9 !== null && Math.abs(h9.Ambient - h9Expect) < 1e-6,
+    `A=${fmt(h9?.Ambient)} 期望 ${fmt(h9Expect)}`);
+  const h21 = await hourAt(21);
+  const h21Expect = (temperatePresets[2].values.Ambient + temperatePresets[3].values.Ambient) / 2;
+  check('21:00 = 黄昏与深夜中点',
+    h21 !== null && Math.abs(h21.Ambient - h21Expect) < 1e-6,
+    `A=${fmt(h21?.Ambient)} 期望 ${fmt(h21Expect)}`);
+  const h3 = await hourAt(3);
+  check('03:00 比 06:00 暗、比 00:00 亮',
+    h3 !== null && h3.Ambient > h0.Ambient && h3.Ambient < h6.Ambient,
+    `A3=${fmt(h3?.Ambient)} A0=${fmt(h0?.Ambient)} A6=${fmt(h6?.Ambient)}`);
+  const snowPresetsFor23 = presets.environments.find(e => e.id === 'snow').presets;
+  const snowH23Expect = (snowPresetsFor23[2].values.Blue + snowPresetsFor23[3].values.Blue * 5) / 6;
+  const snowH23 = await hourAt(23, 'snow');
+  check('雪地 23:00 走非温带曲线（18:00→24:00 的 5/6）',
+    snowH23 !== null && Math.abs(snowH23.Blue - snowH23Expect) < 1e-6,
+    `B=${fmt(snowH23?.Blue)} 期望 ${fmt(snowH23Expect)}`);
 
   // ------------------------------------------------------- 4. random + 种子
   console.log('\n[4] random 模式（抖动 + 种子复现）');
@@ -213,6 +260,10 @@ async function main() {
   check('非法 environment → 400', badEnv.status === 400, badEnv.error);
   const badJitter = await generate(baseBody({ lighting: { mode: 'random', jitter: 0.9 } }));
   check('jitter=0.9 → 400', badJitter.status === 400, badJitter.error);
+  const badHour = await generate(baseBody({ lighting: { mode: 'preset', hour: 25 } }));
+  check('hour=25 → 400', badHour.status === 400, badHour.error);
+  const badHourFloat = await generate(baseBody({ lighting: { mode: 'preset', hour: 9.5 } }));
+  check('hour=9.5 → 400', badHourFloat.status === 400, badHourFloat.error);
 
   console.log(`\n结果：${pass} pass / ${fail} fail`);
   if (fail > 0) process.exitCode = 1;

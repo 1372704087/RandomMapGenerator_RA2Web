@@ -31,7 +31,10 @@ import {
   Random,
   TimeOfDay,
   getLightingPreset,
+  getLightingForHour,
   LIGHTING_ENVIRONMENTS,
+  LIGHTING_HOURS,
+  HOUR_LABELS,
   LIGHTING_ENVIRONMENT_LABELS,
   TIME_OF_DAY_LABELS,
 } from '@ra2/core';
@@ -106,12 +109,19 @@ app.get('/api/lighting/presets', (_req: Request, res: Response) => {
       label: TIME_OF_DAY_LABELS[tod],
       values: getLightingPreset(env, tod),
     })),
+    // 24 个整点的插值结果，前端用它画每小时的色卡
+    hourly: LIGHTING_HOURS.map((hour) => ({
+      hour,
+      label: HOUR_LABELS[hour],
+      values: getLightingForHour(env, hour),
+    })),
   }));
   res.json({
     timeOfDay: ([0, 1, 2, 3] as TimeOfDay[]).map((tod) => ({
       value: tod,
       label: TIME_OF_DAY_LABELS[tod],
     })),
+    hours: LIGHTING_HOURS.map((hour) => ({ value: hour, label: HOUR_LABELS[hour] })),
     environments,
     modes: [
       { value: 'auto', label: '跟随原版（沙漠随机 / 其余不写光照）' },
@@ -760,6 +770,12 @@ function validateLightingRequest(lighting: LightingRequest | undefined): string 
   const environments = ['temperate', 'snow', 'desert', 'newurban', 'islands'];
   if (lighting.environment !== undefined && !environments.includes(lighting.environment)) {
     return `lighting.environment must be one of ${environments.join(', ')}`;
+  }
+
+  if (lighting.hour !== undefined) {
+    if (!Number.isInteger(lighting.hour) || lighting.hour < 0 || lighting.hour > 23) {
+      return 'lighting.hour must be an integer in 0..23';
+    }
   }
 
   if (lighting.jitter !== undefined) {

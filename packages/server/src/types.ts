@@ -162,6 +162,11 @@ export interface LightingRequest {
   mode?: LightingMode;
   /** 时间段 0..3（0 暖光晨昏 / 1 正午 / 2 冷调 / 3 夜间），缺省 1。 */
   timeOfDay?: number;
+  /**
+   * 整点小时 0..23（0 深夜 / 6 日出 / 12 正午 / 18 黄昏），在四档实测值之间
+   * 线性插值。给了就以它为准，`timeOfDay` 被忽略。
+   */
+  hour?: number;
   /** 环境主题；缺省由 theater 名推导（TEMPERATE→temperate，SNOW→snow 等）。 */
   environment?: 'temperate' | 'snow' | 'desert' | 'newurban' | 'islands';
   /** `custom` / `preset` 模式下要覆盖的通道值。 */
@@ -175,6 +180,8 @@ export interface LightingResult {
   mode: LightingMode;
   environment: 'temperate' | 'snow' | 'desert' | 'newurban' | 'islands';
   timeOfDay: number;
+  /** 实际使用的整点小时（没给 hour 时为 undefined） */
+  hour?: number;
   /** 最终写进 `[Lighting]` 的数值。 */
   values: {
     Ambient: number;

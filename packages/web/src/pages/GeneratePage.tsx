@@ -25,10 +25,13 @@ type LightingValues = {
 /** 服务端 `/api/lighting/presets` 返回的预设表。 */
 type LightingPresetResponse = {
   timeOfDay: { value: number; label: string }[];
+  /** 24 个整点（给 hour 时优先于 timeOfDay） */
+  hours: { value: number; label: string }[];
   environments: {
     id: LightingEnvironment;
     label: string;
     presets: { timeOfDay: number; label: string; values: LightingValues }[];
+    hourly: { hour: number; label: string; values: LightingValues }[];
   }[];
   modes: { value: LightingMode; label: string }[];
 };
@@ -53,6 +56,7 @@ type GenerateRequest = {
   lighting?: {
     mode: Exclude<LightingMode, 'auto'>;
     timeOfDay?: number;
+    hour?: number;
     environment?: LightingEnvironment;
     jitter?: number;
     values?: Partial<LightingValues>;
@@ -131,13 +135,27 @@ const FALLBACK_LIGHTING_MODES: { value: LightingMode; label: string }[] = [
   { value: 'custom', label: '自定义通道值' }
 ];
 
-/** 四档时间段文案（与服务端 core/lighting.ts 一致） */
-const FALLBACK_TIME_OF_DAY: { value: number; label: string }[] = [
-  { value: 0, label: '暖光（晨昏）' },
-  { value: 1, label: '正午明亮' },
-  { value: 2, label: '冷调（阴天/黄昏）' },
-  { value: 3, label: '夜间' }
+/** 24 个整点文案（与服务端 core/lighting.ts 的 HOUR_LABELS 一致） */
+const FALLBACK_HOURS: { value: number; label: string }[] = [
+  { value: 0, label: '00:00 深夜' }, { value: 1, label: '01:00 深夜' },
+  { value: 2, label: '02:00 凌晨' }, { value: 3, label: '03:00 凌晨' },
+  { value: 4, label: '04:00 黎明前' }, { value: 5, label: '05:00 黎明' },
+  { value: 6, label: '06:00 日出' }, { value: 7, label: '07:00 清晨' },
+  { value: 8, label: '08:00 清晨' }, { value: 9, label: '09:00 上午' },
+  { value: 10, label: '10:00 上午' }, { value: 11, label: '11:00 上午' },
+  { value: 12, label: '12:00 正午' }, { value: 13, label: '13:00 下午' },
+  { value: 14, label: '14:00 下午' }, { value: 15, label: '15:00 下午' },
+  { value: 16, label: '16:00 傍晚' }, { value: 17, label: '17:00 傍晚' },
+  { value: 18, label: '18:00 黄昏' }, { value: 19, label: '19:00 入夜' },
+  { value: 20, label: '20:00 入夜' }, { value: 21, label: '21:00 夜间' },
+  { value: 22, label: '22:00 夜间' }, { value: 23, label: '23:00 深夜' }
 ];
+
+/** 整点标签（拿不到预设表时的本地兜底）。 */
+function getHourLabel(hour: number): string {
+  const h = ((Math.round(hour) % 24) + 24) % 24;
+  return FALLBACK_HOURS[h]?.label ?? `${h}:00`;
+}
 
 /** 五个环境主题（与服务端 core/lighting.ts 一致） */
 const LIGHTING_ENV_FALLBACK: { id: LightingEnvironment; label: string }[] = [
@@ -209,7 +227,8 @@ export default function GeneratePage() {
 
   /** 环境光照：模式、时段、环境主题、自定义通道、抖动幅度 */
   const [lightingMode, setLightingMode] = useState<LightingMode>('auto');
-  const [lightingTimeOfDay, setLightingTimeOfDay] = useState(1);
+  /** 整点小时 0..23（0 深夜 / 6 日出 / 12 正午 / 18 黄昏），中间整点按曲线插值 */
+  const [lightingHour, setLightingHour] = useState(12);
   /** 空字符串 = 跟随当前地图类型 */
   const [lightingEnv, setLightingEnv] = useState<'' | LightingEnvironment>('');
   const [lightingJitter, setLightingJitter] = useState(0.08);
@@ -372,12 +391,14 @@ export default function GeneratePage() {
   const effectiveLightingEnv: LightingEnvironment =
     lightingEnv || theaterEnvironment(theaterType);
 
-  /** 当前面板将要写出的光照值（自定义模式叠加通道覆盖） */
+  /** 当前面板将要写出的光照值（自定义模式叠加通道覆盖；按整点取色） */
   const lightingPreviewValues = useMemo<LightingValues>(() => {
     const fallback: LightingValues = { Ambient: 1, Red: 1, Green: 1, Blue: 1, Level: 0.03 };
     const env = presetTable?.environments.find(e => e.id === effectiveLightingEnv);
     const base =
-      env?.presets.find(p => p.timeOfDay === lightingTimeOfDay)?.values ?? fallback;
+      env?.hourly.find(h => h.hour === lightingHour)?.values ??
+      env?.presets.find(p => p.timeOfDay === 1)?.values ??
+      fallback;
     const result: LightingValues = { ...base };
     if (lightingMode === 'custom') {
       for (const key of LIGHTING_CHANNEL_KEYS) {
@@ -388,17 +409,28 @@ export default function GeneratePage() {
       }
     }
     return result;
-  }, [presetTable, effectiveLightingEnv, lightingTimeOfDay, lightingMode, lightingCustom]);
+  }, [presetTable, effectiveLightingEnv, lightingHour, lightingMode, lightingCustom]);
 
   /** 把光照值折成一个示意色块（环境光 × 通道增益），让人一眼看出偏暖还是偏蓝 */
-  const lightingSwatch = useMemo(() => {
-    const v = lightingPreviewValues;
+  const swatchOf = (v: LightingValues): string => {
     const to255 = (x: number) => Math.max(0, Math.min(255, Math.round(x * 255)));
     const scale = Math.min(1, Math.max(0.15, v.Ambient));
     return `rgb(${to255(0.95 * scale * v.Red)}, ${to255(0.95 * scale * v.Green)}, ${to255(
       0.95 * scale * v.Blue,
     )})`;
-  }, [lightingPreviewValues]);
+  };
+
+  const lightingSwatch = useMemo(
+    () => swatchOf(lightingPreviewValues),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lightingPreviewValues],
+  );
+
+  /** 当前环境主题的 24 整点日照曲线（供色带预览/点选） */
+  const hourlyCurve = useMemo(() => {
+    const env = presetTable?.environments.find(e => e.id === effectiveLightingEnv);
+    return env?.hourly ?? [];
+  }, [presetTable, effectiveLightingEnv]);
 
   function validate(): string | null {
     if (theaters.length === 0) return '没有可用的地图类型，请检查后端服务';
@@ -554,7 +586,7 @@ export default function GeneratePage() {
       }
       lightingPayload = {
         mode: lightingMode,
-        timeOfDay: lightingTimeOfDay,
+        hour: lightingHour,
         environment: effectiveLightingEnv,
         ...(lightingMode === 'random' ? { jitter: lightingJitter } : {}),
         ...(lightingMode === 'custom' && Object.keys(customValues).length > 0
@@ -824,18 +856,20 @@ export default function GeneratePage() {
           </div>
 
           <div className="field">
-            <label htmlFor="lightingTimeOfDay">时间段</label>
+            <label htmlFor="lightingHour">时刻（0-23 点）</label>
             <select
-              id="lightingTimeOfDay"
-              value={lightingTimeOfDay}
+              id="lightingHour"
+              value={lightingHour}
               disabled={lightingMode === 'auto'}
-              onChange={e => setLightingTimeOfDay(Number(e.target.value))}
+              onChange={e => setLightingHour(Number(e.target.value))}
             >
-              {(presetTable?.timeOfDay ?? FALLBACK_TIME_OF_DAY).map(t => (
+              {(presetTable?.hours ?? FALLBACK_HOURS).map(t => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
-            <span className="field-hint">四档取自游戏自带光照表，不是随手编的色值</span>
+            <span className="field-hint">
+              00:00 / 06:00 / 12:00 / 18:00 是游戏原生四组光照值，其余整点由它们插值而来
+            </span>
           </div>
 
           {lightingMode === 'random' && (
@@ -880,6 +914,51 @@ export default function GeneratePage() {
           </div>
         )}
 
+        {hourlyCurve.length > 0 && (
+          <div className="field">
+            <span className="field-hint">一天 24 小时的天色曲线（点色块直接选时刻）</span>
+            <div style={{ display: 'flex', gap: 2, marginTop: 6 }}>
+              {hourlyCurve.map(h => (
+                <button
+                  key={h.hour}
+                  type="button"
+                  title={`${h.label}  A ${h.values.Ambient} R ${h.values.Red} G ${h.values.Green} B ${h.values.Blue}`}
+                  onClick={() => setLightingHour(h.hour)}
+                  disabled={lightingMode === 'auto'}
+                  style={{
+                    flex: '1 1 0',
+                    height: 34,
+                    padding: 0,
+                    cursor: lightingMode === 'auto' ? 'default' : 'pointer',
+                    borderRadius: 3,
+                    border:
+                      h.hour === lightingHour
+                        ? '2px solid #ffffff'
+                        : '1px solid rgba(0,0,0,.25)',
+                    background: swatchOf(h.values),
+                    opacity: lightingMode === 'auto' ? 0.5 : 1,
+                  }}
+                />
+              ))}
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 2,
+                marginTop: 2,
+                fontSize: 10,
+                opacity: 0.7,
+              }}
+            >
+              {hourlyCurve.map(h => (
+                <span key={h.hour} style={{ flex: '1 1 0', textAlign: 'center' }}>
+                  {h.hour % 3 === 0 ? h.hour : ''}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="field field-inline" style={{ gap: 12, alignItems: 'center' }}>
           <span className="field-hint">色卡预览</span>
           <div
@@ -895,9 +974,11 @@ export default function GeneratePage() {
           <span className="field-hint">
             {lightingMode === 'auto'
               ? '跟随原版（不写死光照）'
-              : `A ${lightingPreviewValues.Ambient} · R ${lightingPreviewValues.Red} · G ${
-                  lightingPreviewValues.Green
-                } · B ${lightingPreviewValues.Blue} · L ${lightingPreviewValues.Level}`}
+              : `${getHourLabel(lightingHour)} · A ${lightingPreviewValues.Ambient} · R ${
+                  lightingPreviewValues.Red
+                } · G ${lightingPreviewValues.Green} · B ${lightingPreviewValues.Blue} · L ${
+                  lightingPreviewValues.Level
+                }`}
           </span>
         </div>
 
