@@ -80,6 +80,13 @@ export interface GenerateOptions {
    * 并通过响应头 `X-Map-Seed` 回给调用方，方便事后复现。
    */
   seed?: number;
+
+  /**
+   * 环境光照（`[Lighting]` 段）。不传 = `auto`，即原版行为：
+   * settings.ini 带光照区间的 theater（目前只有 DESERT）随机抖动，其余不写；
+   * 传 `preset`/`random`/`custom` 则按时间段 + 环境主题强制写入一组颜色。
+   */
+  lighting?: LightingRequest;
 }
 
 /** 地图尺寸范围 */
@@ -124,6 +131,65 @@ export interface TheaterInfo {
   mapUnitCount: number;
 }
 
+/**
+ * 环境光照请求。
+ *
+ * - `auto`（默认）：沿用原版行为 —— settings.ini 带光照区间的 theater（目前只有
+ *   DESERT）随机抖动，其余 theater 不写 `[Lighting]`；
+ * - `preset`：按“环境主题 + 时间段”写死一组真实游戏光照值，所有 theater 都能用；
+ * - `random`：在 preset 的基准值上做 ±`jitter` 的随机抖动（仍受 seed 约束，可复现）；
+ * - `custom`：在 preset 基准上叠加 `values` 里显式给出的通道。
+ */
+export type LightingMode = 'auto' | 'preset' | 'random' | 'custom';
+
+/** `[Lighting]` 的十个键，全部是 0.2..1.6 的小数（`Ion*` 可省）。 */
+export interface LightingRequestValues {
+  Ambient?: number;
+  Red?: number;
+  Green?: number;
+  Blue?: number;
+  Level?: number;
+  IonAmbient?: number;
+  IonRed?: number;
+  IonGreen?: number;
+  IonBlue?: number;
+  IonLevel?: number;
+}
+
+/** 光照请求参数。 */
+export interface LightingRequest {
+  /** 模式，缺省视为 `auto`。 */
+  mode?: LightingMode;
+  /** 时间段 0..3（0 暖光晨昏 / 1 正午 / 2 冷调 / 3 夜间），缺省 1。 */
+  timeOfDay?: number;
+  /** 环境主题；缺省由 theater 名推导（TEMPERATE→temperate，SNOW→snow 等）。 */
+  environment?: 'temperate' | 'snow' | 'desert' | 'newurban' | 'islands';
+  /** `custom` / `preset` 模式下要覆盖的通道值。 */
+  values?: LightingRequestValues;
+  /** `random` 模式的抖动幅度（0..0.5，缺省 0.08）。 */
+  jitter?: number;
+}
+
+/** 实际写入地图的光照结果，回给调用方便于核对/复现。 */
+export interface LightingResult {
+  mode: LightingMode;
+  environment: 'temperate' | 'snow' | 'desert' | 'newurban' | 'islands';
+  timeOfDay: number;
+  /** 最终写进 `[Lighting]` 的数值。 */
+  values: {
+    Ambient: number;
+    Red: number;
+    Green: number;
+    Blue: number;
+    Level: number;
+    IonAmbient?: number;
+    IonRed?: number;
+    IonGreen?: number;
+    IonBlue?: number;
+    IonLevel?: number;
+  };
+}
+
 /** 地图生成结果 */
 export interface GenerateResult {
   /** 生成的地图 INI 内容 */
@@ -132,4 +198,6 @@ export interface GenerateResult {
   fileName: string;
   /** 本次实际使用的随机种子（给了就用给的，没给就是服务端临时摇的） */
   seed?: number;
+  /** 本次实际写入的环境光照（未指定 `lighting` 时不返回） */
+  lighting?: LightingResult;
 }

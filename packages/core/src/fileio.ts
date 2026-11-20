@@ -14,6 +14,7 @@ import { IsoTile } from './tile/isoTile';
 import { Overlay } from './tile/overlay';
 import { Theater, Common } from './tile/enums';
 import { Random } from './random';
+import { LightingValues } from './lighting';
 
 /** Name of the INI section that stores the isometric tile pack. */
 const MapPackName = 'IsoMapPack5';
@@ -706,6 +707,45 @@ export class MapFile {
         lighting.SetStringValue('IonRed', wred.toFixed(6));
         lighting.SetStringValue('IonGreen', wgreen.toFixed(6));
         lighting.SetStringValue('IonBlue', wblue.toFixed(6));
+
+        return mapFile.WriteIniFile();
+    }
+
+    /**
+     * Write an explicit [Lighting] section (no randomness).
+     *
+     * `values` carries the already-resolved numbers (0-1-ish floats, same scale
+     * as the INI stores them). `Ion*` keys are written only when supplied;
+     * otherwise they are removed so the map falls back to the game defaults.
+     */
+    public ChangeLighting(iniContent: string, values: LightingValues): string {
+        const mapFile = new IniFile(iniContent);
+        let lighting = mapFile.GetSection('Lighting');
+        if (lighting === null) {
+            lighting = mapFile.AddSection('Lighting');
+        }
+
+        lighting.SetStringValue('Ambient', values.Ambient.toFixed(6));
+        lighting.SetStringValue('Red', values.Red.toFixed(6));
+        lighting.SetStringValue('Green', values.Green.toFixed(6));
+        lighting.SetStringValue('Blue', values.Blue.toFixed(6));
+        lighting.SetStringValue('Level', values.Level.toFixed(6));
+
+        const optional: [keyof LightingValues, string][] = [
+            ['IonAmbient', 'IonAmbient'],
+            ['IonLevel', 'IonLevel'],
+            ['IonRed', 'IonRed'],
+            ['IonGreen', 'IonGreen'],
+            ['IonBlue', 'IonBlue'],
+        ];
+        for (const [field, key] of optional) {
+            const v = values[field];
+            if (typeof v === 'number' && Number.isFinite(v)) {
+                lighting.SetStringValue(key, v.toFixed(6));
+            } else {
+                lighting.RemoveKey(key);
+            }
+        }
 
         return mapFile.WriteIniFile();
     }

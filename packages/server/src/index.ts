@@ -26,11 +26,19 @@ import {
 } from './resourceLoader';
 import { generateMap } from './generator';
 import { splitFullMap, splitSpawnUnitsForTheater, detectTheater, buildTheaterWarnings } from './splitter';
-import { renderMapPreview, Random } from '@ra2/core';
+import {
+  renderMapPreview,
+  Random,
+  TimeOfDay,
+  getLightingPreset,
+  LIGHTING_ENVIRONMENTS,
+  LIGHTING_ENVIRONMENT_LABELS,
+  TIME_OF_DAY_LABELS,
+} from '@ra2/core';
 import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
 import { putMap, getMap } from './mapHandoff';
-import { GenerateOptions } from './types';
+import { GenerateOptions, LightingRequest } from './types';
 
 // ---------------------------------------------------------------------------
 // 服务器配置
@@ -80,6 +88,37 @@ app.get('/api/theaters', (_req: Request, res: Response) => {
   res.json({
     count: theaters.length,
     theaters,
+  });
+});
+
+/**
+ * GET /api/lighting/presets
+ *
+ * 返回环境光照预设表（4 个时段 × 5 个环境主题），前端用它在「环境光照」
+ * 面板里画色卡预览、并提示可选值，避免前后端各写一份常量。
+ */
+app.get('/api/lighting/presets', (_req: Request, res: Response) => {
+  const environments = LIGHTING_ENVIRONMENTS.map((env) => ({
+    id: env,
+    label: LIGHTING_ENVIRONMENT_LABELS[env],
+    presets: ([0, 1, 2, 3] as TimeOfDay[]).map((tod) => ({
+      timeOfDay: tod,
+      label: TIME_OF_DAY_LABELS[tod],
+      values: getLightingPreset(env, tod),
+    })),
+  }));
+  res.json({
+    timeOfDay: ([0, 1, 2, 3] as TimeOfDay[]).map((tod) => ({
+      value: tod,
+      label: TIME_OF_DAY_LABELS[tod],
+    })),
+    environments,
+    modes: [
+      { value: 'auto', label: '跟随原版（沙漠随机 / 其余不写光照）' },
+      { value: 'preset', label: '固定预设（按时段+环境写死）' },
+      { value: 'random', label: '预设 + 随机抖动（受种子约束）' },
+      { value: 'custom', label: '自定义通道值' },
+    ],
   });
 });
 
@@ -162,7 +201,14 @@ app.post(
       // 预览时凭这个 key 取回原文，省掉前端再上传一次几 MB 的地图文本
       res.setHeader('X-Map-Key', putMap(result.mapContent));
       res.setHeader('X-Map-Seed', String(options.seed));
-      res.setHeader('Access-Control-Expose-Headers', 'X-Map-Key, X-Map-Seed, Content-Disposition');
+      if (result.lighting) {
+        // 环境光照结果回显（JSON，键为 [Lighting] 里的键名），前端可显示当前天色
+        res.setHeader('X-Map-Lighting', JSON.stringify(result.lighting.values));
+      }
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'X-Map-Key, X-Map-Seed, X-Map-Lighting, Content-Disposition',
+      );
 
       res.send(result.mapContent);
     } catch (err) {
@@ -602,6 +648,12 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
     }
   }
 
+  // 环境光照：可选，给了就得是合法组合
+  const lightingError = validateLightingRequest(options.lighting);
+  if (lightingError) {
+    return lightingError;
+  }
+
   // totalRandom 模式下不需要 playerLocations
   if (!options.totalRandom) {
     if (!options.playerLocations || typeof options.playerLocations !== 'object') {
@@ -675,6 +727,81 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
       options.smudge > 0.5
     ) {
       return 'smudge must be a number between 0 and 0.5';
+    }
+  }
+
+  return null;
+}
+
+/** 校验 `lighting` 参数（模式、时段、主题、通道值、抖动幅度）。 */
+function validateLightingRequest(lighting: LightingRequest | undefined): string | null {
+  if (lighting === undefined || lighting === null) {
+    return null;
+  }
+  if (typeof lighting !== 'object' || Array.isArray(lighting)) {
+    return 'lighting must be an object';
+  }
+
+  const modes = ['auto', 'preset', 'random', 'custom'];
+  if (lighting.mode !== undefined && !modes.includes(lighting.mode)) {
+    return `lighting.mode must be one of ${modes.join(', ')}`;
+  }
+
+  if (lighting.timeOfDay !== undefined) {
+    if (
+      !Number.isInteger(lighting.timeOfDay) ||
+      lighting.timeOfDay < 0 ||
+      lighting.timeOfDay > 3
+    ) {
+      return 'lighting.timeOfDay must be an integer in 0..3';
+    }
+  }
+
+  const environments = ['temperate', 'snow', 'desert', 'newurban', 'islands'];
+  if (lighting.environment !== undefined && !environments.includes(lighting.environment)) {
+    return `lighting.environment must be one of ${environments.join(', ')}`;
+  }
+
+  if (lighting.jitter !== undefined) {
+    if (
+      typeof lighting.jitter !== 'number' ||
+      !Number.isFinite(lighting.jitter) ||
+      lighting.jitter < 0 ||
+      lighting.jitter > 0.5
+    ) {
+      return 'lighting.jitter must be a number between 0 and 0.5';
+    }
+  }
+
+  const valueKeys = [
+    'Ambient',
+    'Red',
+    'Green',
+    'Blue',
+    'Level',
+    'IonAmbient',
+    'IonRed',
+    'IonGreen',
+    'IonBlue',
+    'IonLevel',
+  ] as const;
+  if (lighting.values !== undefined) {
+    if (typeof lighting.values !== 'object' || Array.isArray(lighting.values)) {
+      return 'lighting.values must be an object';
+    }
+    for (const key of Object.keys(lighting.values)) {
+      if (!valueKeys.includes(key as (typeof valueKeys)[number])) {
+        return `lighting.values.${key} is not a known channel (${valueKeys.join(', ')})`;
+      }
+      const v = (lighting.values as Record<string, unknown>)[key];
+      if (
+        typeof v !== 'number' ||
+        !Number.isFinite(v) ||
+        v < 0.2 ||
+        v > 1.6
+      ) {
+        return `lighting.values.${key} must be a number between 0.2 and 1.6`;
+      }
     }
   }
 

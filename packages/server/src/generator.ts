@@ -16,6 +16,13 @@ import {
   PreviewImage,
   Theater,
   Random,
+  LightingValues,
+  TimeOfDay,
+  LightingEnvironment,
+  getLightingPreset,
+  applyLightingOverrides,
+  jitterLighting,
+  theaterToLightingEnvironment,
 } from '@ra2/core';
 import {
   getTheaterResources,
@@ -29,7 +36,55 @@ import {
   Direction,
   ALL_DIRECTIONS,
   TheaterSizeConfig,
+  LightingResult,
 } from './types';
+
+/**
+ * 第 14 步：环境光照。
+ *
+ * - `auto`（默认）保持改造前的原版行为：settings.ini 带光照区间就随机抖动
+ *   （目前只有 DESERT），没有就不写 `[Lighting]`；
+ * - `preset` / `random` / `custom` 走统一的预设表（温带、非温带两套真实游戏值，
+ *   沙漠用 settings.ini 中值派生），因此 TEMPERATE / SNOW / NEWURBAN /
+ *   TEMPERATE_Islands 也能拿到明确的环境色。
+ *
+ * `random` 用 `MapFile.Randomizer`，所以抖动结果受 seed 约束，可复现。
+ */
+function applyLighting(
+  mapFile: MapFile,
+  iniContent: string,
+  theater: TheaterResources,
+  options: GenerateOptions,
+): { iniContent: string; lighting?: LightingResult } {
+  const request = options.lighting;
+  const mode = request?.mode ?? 'auto';
+
+  if (mode === 'auto') {
+    if (theater.lightingSettings) {
+      return {
+        iniContent: mapFile.RandomSetLighting(iniContent, theater.lightingSettings),
+      };
+    }
+    return { iniContent };
+  }
+
+  const environment: LightingEnvironment =
+    request?.environment ?? theaterToLightingEnvironment(theater.name);
+  const timeOfDay = (request?.timeOfDay ?? 1) as TimeOfDay;
+  let values: LightingValues = getLightingPreset(environment, timeOfDay);
+
+  if (mode === 'random') {
+    values = jitterLighting(values, request?.jitter ?? 0.08, mapFile.Randomizer);
+  }
+  if (request?.values) {
+    values = applyLightingOverrides(values, request.values);
+  }
+
+  return {
+    iniContent: mapFile.ChangeLighting(iniContent, values),
+    lighting: { mode, environment, timeOfDay, values: { ...values } },
+  };
+}
 
 // ---------------------------------------------------------------------------
 // 玩家 / 尺寸上限
@@ -308,10 +363,9 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     vera20k ? { maxStartingPoints: MAX_PLAYERS_VERA20K, vera20k: true } : undefined,
   );
 
-  // 步骤 14: 随机光照（仅有光照设置的 theater）
-  if (theater.lightingSettings) {
-    ini = mapFile.RandomSetLighting(ini, theater.lightingSettings);
-  }
+  // 步骤 14: 环境光照（auto 沿用原版随机；preset/random/custom 走显式光照表）
+  const lightingStep = applyLighting(mapFile, ini, theater, options);
+  ini = lightingStep.iniContent;
 
   // 步骤 15: 设置游戏模式
   if (options.gamemode) {
@@ -340,7 +394,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
       `fileName="${fileName}", content length=${ini.length}`,
   );
 
-  return { mapContent: ini, fileName, seed };
+  return { mapContent: ini, fileName, seed, lighting: lightingStep.lighting };
 }
 
 // ---------------------------------------------------------------------------

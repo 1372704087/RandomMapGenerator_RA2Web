@@ -8,6 +8,7 @@ export * from './io/index';
 export * from './format/index';
 export * from './fileio';
 export * from './workingMap';
+export * from './lighting';
 export * from './tile/enums';
 export * from './tile/isoTile';
 export * from './tile/overlay';

@@ -9,6 +9,30 @@ type Direction = 'N' | 'S' | 'W' | 'E' | 'NE' | 'SE' | 'NW' | 'SW';
 
 type Players = Record<Direction, number>;
 
+type LightingMode = 'auto' | 'preset' | 'random' | 'custom';
+
+type LightingEnvironment = 'temperate' | 'snow' | 'desert' | 'newurban' | 'islands';
+
+/** `[Lighting]` 的通道值（0.2..1.6）。 */
+type LightingValues = {
+  Ambient: number;
+  Red: number;
+  Green: number;
+  Blue: number;
+  Level: number;
+};
+
+/** 服务端 `/api/lighting/presets` 返回的预设表。 */
+type LightingPresetResponse = {
+  timeOfDay: { value: number; label: string }[];
+  environments: {
+    id: LightingEnvironment;
+    label: string;
+    presets: { timeOfDay: number; label: string; values: LightingValues }[];
+  }[];
+  modes: { value: LightingMode; label: string }[];
+};
+
 type GenerateRequest = {
   width: number;
   height: number;
@@ -25,6 +49,14 @@ type GenerateRequest = {
   vera20k: boolean;
   /** 随机种子；留空则由服务端现摇一个并通过 X-Map-Seed 回显 */
   seed?: number;
+  /** 环境光照；省略 = 跟随原版（auto） */
+  lighting?: {
+    mode: Exclude<LightingMode, 'auto'>;
+    timeOfDay?: number;
+    environment?: LightingEnvironment;
+    jitter?: number;
+    values?: Partial<LightingValues>;
+  };
 };
 
 type Status =
@@ -91,6 +123,36 @@ const EMPTY_PLAYERS: Players = {
   N: 0, S: 0, W: 0, E: 0, NE: 0, SE: 0, NW: 0, SW: 0
 };
 
+/** 光照模式的兜底文案（拿不到 /api/lighting/presets 时也能用） */
+const FALLBACK_LIGHTING_MODES: { value: LightingMode; label: string }[] = [
+  { value: 'auto', label: '跟随原版（沙漠随机 / 其余不写光照）' },
+  { value: 'preset', label: '固定预设（按时段+环境写死）' },
+  { value: 'random', label: '预设 + 随机抖动（受种子约束）' },
+  { value: 'custom', label: '自定义通道值' }
+];
+
+/** 四档时间段文案（与服务端 core/lighting.ts 一致） */
+const FALLBACK_TIME_OF_DAY: { value: number; label: string }[] = [
+  { value: 0, label: '暖光（晨昏）' },
+  { value: 1, label: '正午明亮' },
+  { value: 2, label: '冷调（阴天/黄昏）' },
+  { value: 3, label: '夜间' }
+];
+
+/** 五个环境主题（与服务端 core/lighting.ts 一致） */
+const LIGHTING_ENV_FALLBACK: { id: LightingEnvironment; label: string }[] = [
+  { id: 'temperate', label: '温带' },
+  { id: 'snow', label: '雪地' },
+  { id: 'desert', label: '沙漠' },
+  { id: 'newurban', label: '新城区' },
+  { id: 'islands', label: '岛屿' }
+];
+
+/** `[Lighting]` 里可手填的五个核心通道。 */
+const LIGHTING_CHANNEL_KEYS: (keyof LightingValues)[] = [
+  'Ambient', 'Red', 'Green', 'Blue', 'Level'
+];
+
 // ============== 工具函数 ==============
 function parseFilenameFromHeader(disposition: string | null): string | null {
   if (!disposition) return null;
@@ -145,6 +207,21 @@ export default function GeneratePage() {
   /** 最近一次生成实际用的种子（服务端用 X-Map-Seed 回显，便于复现） */
   const [lastSeed, setLastSeed] = useState<number | null>(null);
 
+  /** 环境光照：模式、时段、环境主题、自定义通道、抖动幅度 */
+  const [lightingMode, setLightingMode] = useState<LightingMode>('auto');
+  const [lightingTimeOfDay, setLightingTimeOfDay] = useState(1);
+  /** 空字符串 = 跟随当前地图类型 */
+  const [lightingEnv, setLightingEnv] = useState<'' | LightingEnvironment>('');
+  const [lightingJitter, setLightingJitter] = useState(0.08);
+  /** 自定义通道，字符串保存，空 = 用预设值 */
+  const [lightingCustom, setLightingCustom] = useState<Record<keyof LightingValues, string>>({
+    Ambient: '', Red: '', Green: '', Blue: '', Level: ''
+  });
+  /** 最近一次生成实际写入的 [Lighting] 值（服务端 X-Map-Lighting 回显） */
+  const [lastLighting, setLastLighting] = useState<LightingValues | null>(null);
+  /** 预设表（服务端 /api/lighting/presets），用于色卡预览 */
+  const [presetTable, setPresetTable] = useState<LightingPresetResponse | null>(null);
+
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [validationError, setValidationError] = useState<string | null>(null);
   /** 生成结果的雷达预览 */
@@ -189,6 +266,22 @@ export default function GeneratePage() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 加载光照预设表（一次即可，用于色卡预览与下拉选项）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/lighting/presets');
+        if (!res.ok) throw new Error(`获取光照预设失败: ${res.status}`);
+        const data = (await res.json()) as LightingPresetResponse;
+        if (!cancelled) setPresetTable(data);
+      } catch {
+        // 拿不到预设表不阻塞生成，只是没有色卡预览
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const totalFromDirs = useMemo(
@@ -265,6 +358,48 @@ export default function GeneratePage() {
     setSmudge(Math.max(SMUDGE_MIN, Math.min(SMUDGE_MAX, n)));
   }
 
+  /** theater 目录名 → 环境主题（与服务端 theaterToLightingEnvironment 保持一致）。 */
+  function theaterEnvironment(theater: string): LightingEnvironment {
+    const upper = (theater || '').toUpperCase();
+    if (upper.startsWith('DESERT')) return 'desert';
+    if (upper.startsWith('SNOW')) return 'snow';
+    if (upper.startsWith('NEWURBAN')) return 'newurban';
+    if (upper.includes('ISLAND')) return 'islands';
+    return 'temperate';
+  }
+
+  /** 空选 = 跟随地图类型。 */
+  const effectiveLightingEnv: LightingEnvironment =
+    lightingEnv || theaterEnvironment(theaterType);
+
+  /** 当前面板将要写出的光照值（自定义模式叠加通道覆盖） */
+  const lightingPreviewValues = useMemo<LightingValues>(() => {
+    const fallback: LightingValues = { Ambient: 1, Red: 1, Green: 1, Blue: 1, Level: 0.03 };
+    const env = presetTable?.environments.find(e => e.id === effectiveLightingEnv);
+    const base =
+      env?.presets.find(p => p.timeOfDay === lightingTimeOfDay)?.values ?? fallback;
+    const result: LightingValues = { ...base };
+    if (lightingMode === 'custom') {
+      for (const key of LIGHTING_CHANNEL_KEYS) {
+        const raw = lightingCustom[key].trim();
+        if (raw === '') continue;
+        const n = Number(raw);
+        if (Number.isFinite(n) && n >= 0.2 && n <= 1.6) result[key] = n;
+      }
+    }
+    return result;
+  }, [presetTable, effectiveLightingEnv, lightingTimeOfDay, lightingMode, lightingCustom]);
+
+  /** 把光照值折成一个示意色块（环境光 × 通道增益），让人一眼看出偏暖还是偏蓝 */
+  const lightingSwatch = useMemo(() => {
+    const v = lightingPreviewValues;
+    const to255 = (x: number) => Math.max(0, Math.min(255, Math.round(x * 255)));
+    const scale = Math.min(1, Math.max(0.15, v.Ambient));
+    return `rgb(${to255(0.95 * scale * v.Red)}, ${to255(0.95 * scale * v.Green)}, ${to255(
+      0.95 * scale * v.Blue,
+    )})`;
+  }, [lightingPreviewValues]);
+
   function validate(): string | null {
     if (theaters.length === 0) return '没有可用的地图类型，请检查后端服务';
     if (!theaterType) return '请选择地图类型';
@@ -318,6 +453,20 @@ export default function GeneratePage() {
     }
     if (smudge < SMUDGE_MIN || smudge > SMUDGE_MAX) {
       return `污迹密度需在 ${SMUDGE_MIN}-${SMUDGE_MAX} 之间`;
+    }
+    // 环境光照：自定义通道值必须是 0.2-1.6 的数字；抖动幅度 0-0.5
+    if (lightingMode === 'custom') {
+      for (const key of LIGHTING_CHANNEL_KEYS) {
+        const raw = lightingCustom[key].trim();
+        if (raw === '') continue;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0.2 || n > 1.6) {
+          return `光照 ${key} 需在 0.2-1.6 之间（留空则用预设值）`;
+        }
+      }
+    }
+    if (lightingMode === 'random' && (lightingJitter < 0 || lightingJitter > 0.5)) {
+      return '光照抖动幅度需在 0-0.5 之间';
     }
     return null;
   }
@@ -390,6 +539,29 @@ export default function GeneratePage() {
 
     // 总人数 >0 时按「快捷」均分；为 0 且有方向计数时用方向计数；两者都空才随机。
     const isRandom = totalRandom || (totalPlayers === 0 && totalFromDirs === 0);
+
+    // 环境光照：auto 对应「省略 lighting」，保持服务端原版行为
+    let lightingPayload: GenerateRequest['lighting'];
+    if (lightingMode !== 'auto') {
+      const customValues: Partial<LightingValues> = {};
+      if (lightingMode === 'custom') {
+        for (const key of LIGHTING_CHANNEL_KEYS) {
+          const raw = lightingCustom[key].trim();
+          if (raw === '') continue;
+          const n = Number(raw);
+          if (Number.isFinite(n)) customValues[key] = n;
+        }
+      }
+      lightingPayload = {
+        mode: lightingMode,
+        timeOfDay: lightingTimeOfDay,
+        environment: effectiveLightingEnv,
+        ...(lightingMode === 'random' ? { jitter: lightingJitter } : {}),
+        ...(lightingMode === 'custom' && Object.keys(customValues).length > 0
+          ? { values: customValues }
+          : {})
+      };
+    }
     const payload: GenerateRequest = {
       width,
       height,
@@ -403,7 +575,8 @@ export default function GeneratePage() {
       totalRandom: isRandom,
       smudge,
       vera20k,
-      ...(seedInput.trim() ? { seed: Number(seedInput.trim()) } : {})
+      ...(seedInput.trim() ? { seed: Number(seedInput.trim()) } : {}),
+      ...(lightingPayload ? { lighting: lightingPayload } : {})
     };
 
     setStatus({ kind: 'loading' });
@@ -455,6 +628,14 @@ export default function GeneratePage() {
       // 服务端回显本次实际使用的种子：留空生成时也拿它复现同一张图
       const seedHeader = res.headers.get('X-Map-Seed');
       if (seedHeader) setLastSeed(Number(seedHeader));
+      const lightingHeader = res.headers.get('X-Map-Lighting');
+      if (lightingHeader) {
+        try {
+          setLastLighting(JSON.parse(lightingHeader) as LightingValues);
+        } catch { /* 头解析失败就不显示 */ }
+      } else {
+        setLastLighting(null);
+      }
       // 后端把地图原文留在内存里并回了 X-Map-Key：预览凭 key 取，不必重传整张图
       const mapKey = res.headers.get('X-Map-Key');
       void startCncmapsPreview(mapKey ? { mapKey } : mapText, filename);
@@ -597,6 +778,135 @@ export default function GeneratePage() {
             <span className="field-hint">范围 {SMUDGE_MIN}-{SMUDGE_MAX}，步进 {SMUDGE_STEP}</span>
           </div>
         </div>
+      </section>
+
+      {/* ========== 环境光照 ========== */}
+      <section className="section">
+        <h2 className="section-title">环境光照</h2>
+
+        <div className="grid">
+          <div className="field">
+            <label htmlFor="lightingMode">光照模式</label>
+            <select
+              id="lightingMode"
+              value={lightingMode}
+              onChange={e => setLightingMode(e.target.value as LightingMode)}
+            >
+              {(presetTable?.modes ?? FALLBACK_LIGHTING_MODES).map(m => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <span className="field-hint">
+              {lightingMode === 'auto'
+                ? '原版行为：沙漠每张随机抖动，其余地图不写 [Lighting]（用游戏默认天色）'
+                : '按时段 + 环境主题写入 [Lighting]，所有地图类型都生效；同 seed 结果一致'}
+            </span>
+          </div>
+
+          <div className="field">
+            <label htmlFor="lightingEnv">环境主题</label>
+            <select
+              id="lightingEnv"
+              value={lightingEnv}
+              disabled={lightingMode === 'auto'}
+              onChange={e => setLightingEnv(e.target.value as '' | LightingEnvironment)}
+            >
+              <option value="">
+                跟随地图类型（{THEATER_LABELS[theaterType] ?? theaterType ?? '未选择'}）
+              </option>
+              {(presetTable?.environments ?? LIGHTING_ENV_FALLBACK).map(env => (
+                <option key={env.id} value={env.id}>{env.label}</option>
+              ))}
+            </select>
+            <span className="field-hint">
+              沙漠走偏黄底色（由原版 settings.ini 中值派生），其余走游戏的冷/暖色调表
+            </span>
+          </div>
+
+          <div className="field">
+            <label htmlFor="lightingTimeOfDay">时间段</label>
+            <select
+              id="lightingTimeOfDay"
+              value={lightingTimeOfDay}
+              disabled={lightingMode === 'auto'}
+              onChange={e => setLightingTimeOfDay(Number(e.target.value))}
+            >
+              {(presetTable?.timeOfDay ?? FALLBACK_TIME_OF_DAY).map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <span className="field-hint">四档取自游戏自带光照表，不是随手编的色值</span>
+          </div>
+
+          {lightingMode === 'random' && (
+            <div className="field">
+              <label htmlFor="lightingJitter">抖动幅度</label>
+              <input
+                id="lightingJitter"
+                type="number"
+                min={0}
+                max={0.5}
+                step={0.01}
+                value={lightingJitter}
+                onChange={e => setLightingJitter(safeParseFloat(e.target.value, 0.08))}
+              />
+              <span className="field-hint">
+                每个通道 ±{Math.round(lightingJitter * 100)}%，用种子约束，换 seed 才换天色
+              </span>
+            </div>
+          )}
+        </div>
+
+        {lightingMode === 'custom' && (
+          <div className="grid">
+            {LIGHTING_CHANNEL_KEYS.map(key => (
+              <div className="field" key={key}>
+                <label htmlFor={`lighting-${key}`}>{key}</label>
+                <input
+                  id={`lighting-${key}`}
+                  type="number"
+                  min={0.2}
+                  max={1.6}
+                  step={0.01}
+                  value={lightingCustom[key]}
+                  placeholder={String(lightingPreviewValues[key])}
+                  onChange={e =>
+                    setLightingCustom(prev => ({ ...prev, [key]: e.target.value }))
+                  }
+                />
+                <span className="field-hint">留空 = 用预设 {lightingPreviewValues[key]}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="field field-inline" style={{ gap: 12, alignItems: 'center' }}>
+          <span className="field-hint">色卡预览</span>
+          <div
+            style={{
+              width: 96,
+              height: 28,
+              borderRadius: 6,
+              border: '1px solid rgba(0,0,0,.25)',
+              background: lightingMode === 'auto' ? '#8a8a8a' : lightingSwatch,
+            }}
+            title={lightingSwatch}
+          />
+          <span className="field-hint">
+            {lightingMode === 'auto'
+              ? '跟随原版（不写死光照）'
+              : `A ${lightingPreviewValues.Ambient} · R ${lightingPreviewValues.Red} · G ${
+                  lightingPreviewValues.Green
+                } · B ${lightingPreviewValues.Blue} · L ${lightingPreviewValues.Level}`}
+          </span>
+        </div>
+
+        {lastLighting && (
+          <span className="field-hint">
+            上一张实际写入：A {lastLighting.Ambient} · R {lastLighting.Red} · G {lastLighting.Green} · B{' '}
+            {lastLighting.Blue} · L {lastLighting.Level}
+          </span>
+        )}
       </section>
 
       {/* ========== 玩家数量 ========== */}
