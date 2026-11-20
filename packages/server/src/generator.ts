@@ -24,6 +24,7 @@ import {
   applyLightingOverrides,
   jitterLighting,
   theaterToLightingEnvironment,
+  applyIonStorm,
 } from '@ra2/core';
 import {
   getTheaterResources,
@@ -383,6 +384,15 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     ini = mapFile.AddAdditionalINI(ini, theater.additionIniContent);
   }
 
+  // 步骤 16b: 随机离子风暴（必须在光照与 addition.ini 合并之后，否则 Ion* 会被覆盖）
+  const ionStormStep = applyIonStorm(
+    ini,
+    options.ionStorm,
+    mapFile.Width,
+    mapFile.Height,
+  );
+  ini = ionStormStep.iniContent;
+
   // 步骤 17: 修改名称
   const mapName = options.name || globalRes.outputName;
   ini = mapFile.ChangeName(ini, mapName);
@@ -400,7 +410,13 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
       `fileName="${fileName}", content length=${ini.length}`,
   );
 
-  return { mapContent: ini, fileName, seed, lighting: lightingStep.lighting };
+  return {
+    mapContent: ini,
+    fileName,
+    seed,
+    lighting: lightingStep.lighting,
+    ionStorm: ionStormStep.ionStorm,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -61,6 +61,12 @@ type GenerateRequest = {
     jitter?: number;
     values?: Partial<LightingValues>;
   };
+  /** 随机离子风暴；省略或 enabled:false = 不写任何风暴相关键 */
+  ionStorm?: {
+    enabled: boolean;
+    intervalSeconds?: number;
+    randomize?: boolean;
+  };
 };
 
 type Status =
@@ -238,6 +244,16 @@ export default function GeneratePage() {
   });
   /** 最近一次生成实际写入的 [Lighting] 值（服务端 X-Map-Lighting 回显） */
   const [lastLighting, setLastLighting] = useState<LightingValues | null>(null);
+  /** 随机离子风暴：开关、间隔秒数、间隔是否随机 */
+  const [ionStormEnabled, setIonStormEnabled] = useState(false);
+  const [ionStormInterval, setIonStormInterval] = useState(600);
+  const [ionStormRandomize, setIonStormRandomize] = useState(false);
+  /** 最近一次生成的风暴配置（服务端 X-Map-IonStorm 回显） */
+  const [lastIonStorm, setLastIonStorm] = useState<{
+    intervalSeconds: number;
+    randomize: boolean;
+    cell: { x: number; y: number };
+  } | null>(null);
   /** 预设表（服务端 /api/lighting/presets），用于色卡预览 */
   const [presetTable, setPresetTable] = useState<LightingPresetResponse | null>(null);
 
@@ -600,6 +616,15 @@ export default function GeneratePage() {
       theaterType,
       name: mapName.trim(),
       gamemode,
+      ...(ionStormEnabled
+        ? {
+            ionStorm: {
+              enabled: true,
+              intervalSeconds: ionStormInterval,
+              randomize: ionStormRandomize
+            }
+          }
+        : {}),
       ...(isRandom
         ? {}
         : { playerLocations: totalPlayers > 0 ? distributePlayers(totalPlayers) : players }),
@@ -667,6 +692,20 @@ export default function GeneratePage() {
         } catch { /* 头解析失败就不显示 */ }
       } else {
         setLastLighting(null);
+      }
+      const ionStormHeader = res.headers.get('X-Map-IonStorm');
+      if (ionStormHeader) {
+        try {
+          setLastIonStorm(
+            JSON.parse(ionStormHeader) as {
+              intervalSeconds: number;
+              randomize: boolean;
+              cell: { x: number; y: number };
+            },
+          );
+        } catch { /* 头解析失败就不显示 */ }
+      } else {
+        setLastIonStorm(null);
       }
       // 后端把地图原文留在内存里并回了 X-Map-Key：预览凭 key 取，不必重传整张图
       const mapKey = res.headers.get('X-Map-Key');
@@ -986,6 +1025,68 @@ export default function GeneratePage() {
           <span className="field-hint">
             上一张实际写入：A {lastLighting.Ambient} · R {lastLighting.Red} · G {lastLighting.Green} · B{' '}
             {lastLighting.Blue} · L {lastLighting.Level}
+          </span>
+        )}
+      </section>
+
+      {/* ========== 随机离子风暴 ========== */}
+      <section className="section">
+        <h2 className="section-title">随机离子风暴</h2>
+
+        <div className="field field-inline">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={ionStormEnabled}
+              onChange={e => setIonStormEnabled(e.target.checked)}
+            />
+            <span>周期性闪电风暴（在地图中心起风暴，数值用原版 rulesmd）</span>
+          </label>
+        </div>
+        <span className="field-hint">
+          写 [General] 原版闪电数值 + [Lighting] Ion* + 一个循环 trigger（Action 102），
+          不碰任何超级武器 TechLevel；风暴期间雷达失效、落雷按原版伤害结算。
+        </span>
+
+        {ionStormEnabled && (
+          <div className="grid">
+            <div className="field">
+              <label htmlFor="ionStormInterval">间隔（秒）</label>
+              <input
+                id="ionStormInterval"
+                type="number"
+                min={30}
+                max={3600}
+                step={30}
+                value={ionStormInterval}
+                onChange={e => setIonStormInterval(Number(e.target.value))}
+              />
+              <span className="field-hint">
+                30-3600 秒；默认 600（约 10 分钟一场），持续时长按原版 180 帧
+              </span>
+            </div>
+
+            <div className="field">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={ionStormRandomize}
+                  onChange={e => setIonStormRandomize(e.target.checked)}
+                />
+                <span>间隔随机（实际为设定值的 0.5~1.5 倍）</span>
+              </label>
+              <span className="field-hint">
+                不勾 = 严格按间隔重复（Event 13）；勾选 = 每次在窗口内随机（Event 51）
+              </span>
+            </div>
+          </div>
+        )}
+
+        {lastIonStorm && (
+          <span className="field-hint">
+            上一张实际写入：间隔 {lastIonStorm.intervalSeconds}s ·
+            中心 ({lastIonStorm.cell.x},{lastIonStorm.cell.y}) ·
+            {lastIonStorm.randomize ? '随机窗口' : '固定周期'}
           </span>
         )}
       </section>

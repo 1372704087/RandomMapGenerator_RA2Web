@@ -87,6 +87,13 @@ export interface GenerateOptions {
    * 传 `preset`/`random`/`custom` 则按时间段 + 环境主题强制写入一组颜色。
    */
   lighting?: LightingRequest;
+
+  /**
+   * 随机离子风暴（周期性闪电风暴）。不传/`enabled:false` = 不写任何风暴相关键；
+   * `enabled:true` 则写入 `[General]` 原版闪电数值 + `[Lighting]` Ion* +
+   * 一个在地图中心循环起风暴的 trigger（不碰任何超级武器 TechLevel）。
+   */
+  ionStorm?: IonStormRequest;
 }
 
 /** 地图尺寸范围 */
@@ -197,6 +204,44 @@ export interface LightingResult {
   };
 }
 
+/** `[General]` 里的闪电风暴数值（原版 rulesmd.ini 的量级）。 */
+export interface IonStormValues {
+  damage: number;
+  deferment: number;
+  duration: number;
+  hitDelay: number;
+  cellSpread: number;
+  scatterDelay: number;
+  separation: number;
+}
+
+/** 随机离子风暴请求（对齐 core 的 `IonStormOptions`）。 */
+export interface IonStormRequest {
+  enabled?: boolean;
+  /** 两场风暴之间的间隔秒数（默认 600）。 */
+  intervalSeconds?: number;
+  /** true = 间隔在 0.5~1.5 倍之间随机，false = 严格周期。 */
+  randomize?: boolean;
+  /** 覆盖任意一条 `[General]` 数值。 */
+  values?: Partial<IonStormValues>;
+}
+
+/** 实际写入的离子风暴配置，回给调用方便于核对。 */
+export interface IonStormResult {
+  enabled: true;
+  intervalSeconds: number;
+  randomize: boolean;
+  values: IonStormValues;
+  /** 风暴中心 waypoint 编号。 */
+  waypoint: number;
+  /** 风暴中心格坐标。 */
+  cell: { x: number; y: number };
+  /** 实际使用的触发事件号（13 = 严格周期，51 = 随机窗口）。 */
+  eventId: number;
+  /** 实际使用的动作号（102 = Lightning Storm strike）。 */
+  actionId: number;
+}
+
 /** 地图生成结果 */
 export interface GenerateResult {
   /** 生成的地图 INI 内容 */
@@ -207,4 +252,6 @@ export interface GenerateResult {
   seed?: number;
   /** 本次实际写入的环境光照（未指定 `lighting` 时不返回） */
   lighting?: LightingResult;
+  /** 本次实际写入的离子风暴配置（未开启时不返回） */
+  ionStorm?: IonStormResult;
 }

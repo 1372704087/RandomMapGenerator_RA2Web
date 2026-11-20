@@ -41,7 +41,7 @@ import {
 import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
 import { putMap, getMap } from './mapHandoff';
-import { GenerateOptions, LightingRequest } from './types';
+import { GenerateOptions, LightingRequest, IonStormRequest } from './types';
 
 // ---------------------------------------------------------------------------
 // 服务器配置
@@ -215,9 +215,21 @@ app.post(
         // 环境光照结果回显（JSON，键为 [Lighting] 里的键名），前端可显示当前天色
         res.setHeader('X-Map-Lighting', JSON.stringify(result.lighting.values));
       }
+      if (result.ionStorm) {
+        // 离子风暴回显：间隔、风暴中心格、实际使用的 event/action
+        res.setHeader(
+          'X-Map-IonStorm',
+          JSON.stringify({
+            intervalSeconds: result.ionStorm.intervalSeconds,
+            randomize: result.ionStorm.randomize,
+            cell: result.ionStorm.cell,
+            eventId: result.ionStorm.eventId,
+          }),
+        );
+      }
       res.setHeader(
         'Access-Control-Expose-Headers',
-        'X-Map-Key, X-Map-Seed, X-Map-Lighting, Content-Disposition',
+        'X-Map-Key, X-Map-Seed, X-Map-Lighting, X-Map-IonStorm, Content-Disposition',
       );
 
       res.send(result.mapContent);
@@ -664,6 +676,12 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
     return lightingError;
   }
 
+  // 随机离子风暴：可选，给了就得是合法组合
+  const ionStormError = validateIonStormRequest(options.ionStorm);
+  if (ionStormError) {
+    return ionStormError;
+  }
+
   // totalRandom 模式下不需要 playerLocations
   if (!options.totalRandom) {
     if (!options.playerLocations || typeof options.playerLocations !== 'object') {
@@ -816,6 +834,66 @@ function validateLightingRequest(lighting: LightingRequest | undefined): string 
       const max = isLevel ? 0.2 : 1.6;
       if (typeof v !== 'number' || !Number.isFinite(v) || v < min || v > max) {
         return `lighting.values.${key} must be a number between ${min} and ${max}`;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 校验随机离子风暴参数。
+ *
+ * 只有 `enabled:true` 时才写任何东西，其余字段都可以省（间隔默认 600 秒、
+ * 数值默认原版）。数值范围按帧/伤害量级给宽松上限，防止写出离谱的值。
+ */
+function validateIonStormRequest(ionStorm: IonStormRequest | undefined): string | null {
+  if (ionStorm === undefined || ionStorm === null) {
+    return null;
+  }
+  if (typeof ionStorm !== 'object' || Array.isArray(ionStorm)) {
+    return 'ionStorm must be an object';
+  }
+
+  if (ionStorm.enabled !== undefined && typeof ionStorm.enabled !== 'boolean') {
+    return 'ionStorm.enabled must be a boolean';
+  }
+
+  if (ionStorm.intervalSeconds !== undefined) {
+    if (
+      typeof ionStorm.intervalSeconds !== 'number' ||
+      !Number.isInteger(ionStorm.intervalSeconds) ||
+      ionStorm.intervalSeconds < 30 ||
+      ionStorm.intervalSeconds > 3600
+    ) {
+      return 'ionStorm.intervalSeconds must be an integer between 30 and 3600';
+    }
+  }
+
+  if (ionStorm.randomize !== undefined && typeof ionStorm.randomize !== 'boolean') {
+    return 'ionStorm.randomize must be a boolean';
+  }
+
+  const valueKeys = [
+    'damage',
+    'deferment',
+    'duration',
+    'hitDelay',
+    'cellSpread',
+    'scatterDelay',
+    'separation',
+  ] as const;
+  if (ionStorm.values !== undefined) {
+    if (typeof ionStorm.values !== 'object' || Array.isArray(ionStorm.values)) {
+      return 'ionStorm.values must be an object';
+    }
+    for (const key of Object.keys(ionStorm.values)) {
+      if (!valueKeys.includes(key as (typeof valueKeys)[number])) {
+        return `ionStorm.values.${key} is not a known key (${valueKeys.join(', ')})`;
+      }
+      const v = (ionStorm.values as Record<string, unknown>)[key];
+      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0 || v > 1000) {
+        return `ionStorm.values.${key} must be a number between 0 and 1000`;
       }
     }
   }
