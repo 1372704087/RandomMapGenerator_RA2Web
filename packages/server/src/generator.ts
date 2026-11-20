@@ -390,6 +390,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     options.ionStorm,
     mapFile.Width,
     mapFile.Height,
+    mapFile.Randomizer,
   );
   ini = ionStormStep.iniContent;
 

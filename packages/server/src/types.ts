@@ -218,12 +218,24 @@ export interface IonStormValues {
 /** 随机离子风暴请求（对齐 core 的 `IonStormOptions`）。 */
 export interface IonStormRequest {
   enabled?: boolean;
-  /** 两场风暴之间的间隔秒数（默认 600）。 */
+  /** 平均两场风暴之间的间隔秒数（默认 600）。 */
   intervalSeconds?: number;
   /** true = 间隔在 0.5~1.5 倍之间随机，false = 严格周期。 */
   randomize?: boolean;
+  /** 风暴点位数 1..12（默认 4；点位各占一个 waypoint + trigger）。 */
+  sites?: number;
   /** 覆盖任意一条 `[General]` 数值。 */
   values?: Partial<IonStormValues>;
+}
+
+/** 单个风暴点位。 */
+export interface IonStormSite {
+  waypoint: number;
+  cell: { x: number; y: number };
+  triggerId: string;
+  tagId: string;
+  /** 该点位自己的触发间隔（秒）。 */
+  intervalSeconds: number;
 }
 
 /** 实际写入的离子风暴配置，回给调用方便于核对。 */
@@ -232,9 +244,13 @@ export interface IonStormResult {
   intervalSeconds: number;
   randomize: boolean;
   values: IonStormValues;
-  /** 风暴中心 waypoint 编号。 */
+  /** 点位数。 */
+  siteCount: number;
+  /** 所有点位（首个点位同时用于 `waypoint` / `cell` 回显）。 */
+  sites: IonStormSite[];
+  /** 风暴中心 waypoint 编号（首个点位）。 */
   waypoint: number;
-  /** 风暴中心格坐标。 */
+  /** 风暴中心格坐标（首个点位）。 */
   cell: { x: number; y: number };
   /** 实际使用的触发事件号（13 = 严格周期，51 = 随机窗口）。 */
   eventId: number;

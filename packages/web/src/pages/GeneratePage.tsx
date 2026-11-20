@@ -66,6 +66,7 @@ type GenerateRequest = {
     enabled: boolean;
     intervalSeconds?: number;
     randomize?: boolean;
+    sites?: number;
   };
 };
 
@@ -244,14 +245,17 @@ export default function GeneratePage() {
   });
   /** 最近一次生成实际写入的 [Lighting] 值（服务端 X-Map-Lighting 回显） */
   const [lastLighting, setLastLighting] = useState<LightingValues | null>(null);
-  /** 随机离子风暴：开关、间隔秒数、间隔是否随机 */
+  /** 随机离子风暴：开关、平均间隔秒数、间隔是否随机、点位数 */
   const [ionStormEnabled, setIonStormEnabled] = useState(false);
   const [ionStormInterval, setIonStormInterval] = useState(600);
   const [ionStormRandomize, setIonStormRandomize] = useState(false);
+  const [ionStormSites, setIonStormSites] = useState(4);
   /** 最近一次生成的风暴配置（服务端 X-Map-IonStorm 回显） */
   const [lastIonStorm, setLastIonStorm] = useState<{
     intervalSeconds: number;
     randomize: boolean;
+    siteCount?: number;
+    sites?: Array<{ w: number; x: number; y: number }>;
     cell: { x: number; y: number };
   } | null>(null);
   /** 预设表（服务端 /api/lighting/presets），用于色卡预览 */
@@ -621,7 +625,8 @@ export default function GeneratePage() {
             ionStorm: {
               enabled: true,
               intervalSeconds: ionStormInterval,
-              randomize: ionStormRandomize
+              randomize: ionStormRandomize,
+              sites: ionStormSites
             }
           }
         : {}),
@@ -700,6 +705,8 @@ export default function GeneratePage() {
             JSON.parse(ionStormHeader) as {
               intervalSeconds: number;
               randomize: boolean;
+              siteCount?: number;
+              sites?: Array<{ w: number; x: number; y: number }>;
               cell: { x: number; y: number };
             },
           );
@@ -1040,18 +1047,34 @@ export default function GeneratePage() {
               checked={ionStormEnabled}
               onChange={e => setIonStormEnabled(e.target.checked)}
             />
-            <span>周期性闪电风暴（在地图中心起风暴，数值用原版 rulesmd）</span>
+            <span>周期性闪电风暴（多点位轮流起风暴，数值用原版 rulesmd）</span>
           </label>
         </div>
         <span className="field-hint">
-          写 [General] 原版闪电数值 + [Lighting] Ion* + 一个循环 trigger（Action 102），
+          写 [General] 原版闪电数值 + [Lighting] Ion* + 若干循环 trigger（Action 102），
           不碰任何超级武器 TechLevel；风暴期间雷达失效、落雷按原版伤害结算。
         </span>
 
         {ionStormEnabled && (
           <div className="grid">
             <div className="field">
-              <label htmlFor="ionStormInterval">间隔（秒）</label>
+              <label htmlFor="ionStormSites">风暴点位（处）</label>
+              <input
+                id="ionStormSites"
+                type="number"
+                min={1}
+                max={12}
+                value={ionStormSites}
+                onChange={e => setIonStormSites(Number(e.target.value))}
+              />
+              <span className="field-hint">
+                1 = 只在地图正中；2-12 = 把地图均分若干片、每片随机落一点（受 seed 约束可复现），
+                玩家看到的位置与顺序都不固定
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="ionStormInterval">平均间隔（秒）</label>
               <input
                 id="ionStormInterval"
                 type="number"
@@ -1062,7 +1085,11 @@ export default function GeneratePage() {
                 onChange={e => setIonStormInterval(Number(e.target.value))}
               />
               <span className="field-hint">
-                30-3600 秒；默认 600（约 10 分钟一场），持续时长按原版 180 帧
+                {ionStormSites > 1
+                  ? `30-3600 秒；每个点位自己的间隔是 ${ionStormInterval} × ${ionStormSites} = ${
+                      ionStormInterval * ionStormSites
+                    } 秒，合起来平均 ${ionStormInterval} 秒一场`
+                  : '30-3600 秒；默认 600（约 10 分钟一场），持续时长按原版 180 帧'}
               </span>
             </div>
 
@@ -1076,7 +1103,8 @@ export default function GeneratePage() {
                 <span>间隔随机（实际为设定值的 0.5~1.5 倍）</span>
               </label>
               <span className="field-hint">
-                不勾 = 严格按间隔重复（Event 13）；勾选 = 每次在窗口内随机（Event 51）
+                不勾 = 严格按间隔重复（Event 13）；勾选 = 每次在窗口内随机（Event 51），
+                多个点位各漂各的，位置顺序更散
               </span>
             </div>
           </div>
@@ -1084,8 +1112,12 @@ export default function GeneratePage() {
 
         {lastIonStorm && (
           <span className="field-hint">
-            上一张实际写入：间隔 {lastIonStorm.intervalSeconds}s ·
-            中心 ({lastIonStorm.cell.x},{lastIonStorm.cell.y}) ·
+            上一张实际写入：{lastIonStorm.siteCount ?? 1} 个点位 · 平均间隔{' '}
+            {lastIonStorm.intervalSeconds}s{(lastIonStorm.sites ?? []).length > 0
+              ? ` · 点位 ${(lastIonStorm.sites ?? [])
+                  .map(s => `(${s.x},${s.y})`)
+                  .join(' ')}`
+              : ` · 中心 (${lastIonStorm.cell.x},${lastIonStorm.cell.y})`} ·
             {lastIonStorm.randomize ? '随机窗口' : '固定周期'}
           </span>
         )}

@@ -222,6 +222,12 @@ app.post(
           JSON.stringify({
             intervalSeconds: result.ionStorm.intervalSeconds,
             randomize: result.ionStorm.randomize,
+            siteCount: result.ionStorm.siteCount,
+            sites: result.ionStorm.sites.map((s) => ({
+              w: s.waypoint,
+              x: s.cell.x,
+              y: s.cell.y,
+            })),
             cell: result.ionStorm.cell,
             eventId: result.ionStorm.eventId,
           }),
@@ -872,6 +878,17 @@ function validateIonStormRequest(ionStorm: IonStormRequest | undefined): string 
 
   if (ionStorm.randomize !== undefined && typeof ionStorm.randomize !== 'boolean') {
     return 'ionStorm.randomize must be a boolean';
+  }
+
+  if (ionStorm.sites !== undefined) {
+    if (
+      typeof ionStorm.sites !== 'number' ||
+      !Number.isInteger(ionStorm.sites) ||
+      ionStorm.sites < 1 ||
+      ionStorm.sites > 12
+    ) {
+      return 'ionStorm.sites must be an integer between 1 and 12';
+    }
   }
 
   const valueKeys = [

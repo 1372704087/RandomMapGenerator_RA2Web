@@ -3,15 +3,17 @@
  *
  * 用法：
  *   node scripts/verify-ionstorm.mjs
- *   RA2_API=http://127.0.0.1:3051 node scripts/verify-ionstorm.mjs
+ *   RA2_API=http://127.0.0.1:3052 node scripts/verify-ionstorm.mjs
  *
  * 覆盖：
  *   1. 不开启：不写 [Triggers]/[General] Lightning*，也没有 X-Map-IonStorm
- *   2. 开启（默认）：[General] 原版七键、[Lighting] Ion* 四键、触发链三段 + tag + waypoint
- *   3. 间隔与 randomize 切换（Event 13 / 51）
- *   4. 风暴中心 = 地图中心；waypoint 编号 16
- *   5. 不停用超级武器：地图里不出现 GACSPH/GAWEAT/NAIRON/NAMISL/YAGNTC/YAPPET 的 TechLevel
- *   6. 参数校验（间隔越界 / 数值非法 / enabled 非布尔）
+ *   2. 开启（默认 4 点位）：[General] 原版七键、[Lighting] Ion* 四键、
+ *      4 组 trigger/tag/waypoint、每个点位间隔 = 平均值 × 4
+ *   3. sites=1 回落为地图正中单点位
+ *   4. randomize 切换 Event 51
+ *   5. 点位都在图内、互不重复
+ *   6. 不停用超级武器：地图里不出现 GACSPH/GAWEAT/NAIRON/NAMISL/YAGNTC/YAPPET 的段
+ *   7. 参数校验（间隔/点位越界、数值非法、enabled 非布尔）
  */
 
 const BASE = process.env.RA2_API || 'http://127.0.0.1:3000';
@@ -56,11 +58,7 @@ async function generate(body) {
   return {
     status: res.status,
     mapContent: await res.text(),
-    headers: {
-      ionStorm: res.headers.get('X-Map-IonStorm'),
-      mapKey: res.headers.get('X-Map-Key'),
-      width: res.headers.get('X-Map-Width'),
-    },
+    headers: { ionStorm: res.headers.get('X-Map-IonStorm') },
   };
 }
 
@@ -73,11 +71,10 @@ const BASE_BODY = {
   lighting: { mode: 'preset', hour: 12 },
 };
 
-function centerOf(mapContent) {
-  const header = sectionOf(mapContent, 'Header') ?? {};
-  const width = Number(header.Width);
-  const height = Number(header.Height);
-  return { x: Math.floor(width / 2), y: Math.floor(height / 2), width, height };
+/** `[Waypoints]` 里 `YXXX` → {x,y} */
+function parseCell(value) {
+  const raw = String(value);
+  return { x: Number(raw.slice(-3)), y: Number(raw.slice(0, -3)) };
 }
 
 async function run() {
@@ -86,14 +83,14 @@ async function run() {
   // 1. 不开启
   const off = await generate({ ...BASE_BODY });
   {
-    check('不开启：HTTP 200', off.status === 200, `status=${off.status}`);
     const map = off.mapContent ?? '';
+    check('不开启：HTTP 200', off.status === 200, `status=${off.status}`);
     check('不开启：没有 X-Map-IonStorm', off.headers?.ionStorm === null, String(off.headers?.ionStorm));
     check('不开启：没有 [Triggers] 段', sectionOf(map, 'Triggers') === null);
     check('不开启：没有 [General] LightningDamage', (sectionOf(map, 'General') ?? {}).LightningDamage === undefined);
   }
 
-  // 2. 开启（默认）
+  // 2. 开启（默认 4 点位）
   const on = await generate({ ...BASE_BODY, ionStorm: { enabled: true } });
   {
     check('开启：HTTP 200', on.status === 200, `status=${on.status}`);
@@ -118,51 +115,94 @@ async function run() {
     check('[Lighting] IonGreen=0.445000', lighting.IonGreen === '0.445000', lighting.IonGreen);
     check('[Lighting] IonBlue=0.775000', lighting.IonBlue === '0.775000', lighting.IonBlue);
 
-    const triggers = sectionOf(map, 'Triggers') ?? {};
-    const triggerIds = Object.keys(triggers);
-    check('恰好一个触发器', triggerIds.length === 1, triggerIds.join(','));
-    check(
-      '触发器为循环（第 5 位 2）',
-      Object.values(triggers)[0] === 'Neutral,<none>,Random Ion Storm,0,1,1,1,2',
-      Object.values(triggers)[0],
-    );
-    const events = sectionOf(map, 'Events') ?? {};
-    check('Event 13 + 默认 600 秒', Object.values(events)[0] === '13,0,600', Object.values(events)[0]);
-    const actions = sectionOf(map, 'Actions') ?? {};
-    check('Action 102 指向 waypoint 16', Object.values(actions)[0] === '102,0,0,0,0,0,0,16', Object.values(actions)[0]);
-    const tags = sectionOf(map, 'Tags') ?? {};
-    check('tag 指向同一触发器', Object.values(tags)[0]?.endsWith(triggerIds[0] ?? ''), Object.values(tags)[0]);
-
-    const waypoints = sectionOf(map, 'Waypoints') ?? {};
-    const center = centerOf(map);
-    const expectedCell = `${center.y}${String(center.x).padStart(3, '0')}`;
-    check(
-      `waypoint 16 在地图中心 ${center.width}x${center.height}`,
-      waypoints['16'] === expectedCell,
-      `${waypoints['16']} vs ${expectedCell}`,
-    );
-
-    // 出生点没被动过
-    check('出生点 waypoint 0 仍在', typeof waypoints['0'] === 'string' && waypoints['0'].length > 3);
-
     const header = JSON.parse(on.headers.ionStorm ?? '{}');
-    check('回显间隔 600', header.intervalSeconds === 600, String(header.intervalSeconds));
-    check('回显 eventId 13', header.eventId === 13, String(header.eventId));
-    check('回显中心格', header.cell?.x === center.x && header.cell?.y === center.y, JSON.stringify(header.cell));
-  }
+    check('默认 4 个点位', header.siteCount === 4, String(header.siteCount));
 
-  // 3. 间隔 + 随机窗口
-  const random = await generate({ ...BASE_BODY, ionStorm: { enabled: true, intervalSeconds: 900, randomize: true } });
-  {
-    const map = random.mapContent ?? '';
+    const triggers = sectionOf(map, 'Triggers') ?? {};
     const events = sectionOf(map, 'Events') ?? {};
-    check('randomize：Event 51/900', Object.values(events)[0] === '51,0,900', Object.values(events)[0]);
-    const header = JSON.parse(random.headers.ionStorm ?? '{}');
-    check('randomize：回显 eventId 51', header.eventId === 51, String(header.eventId));
-    check('randomize：回显 900 秒', header.intervalSeconds === 900, String(header.intervalSeconds));
+    const actions = sectionOf(map, 'Actions') ?? {};
+    const tags = sectionOf(map, 'Tags') ?? {};
+    const waypoints = sectionOf(map, 'Waypoints') ?? {};
+
+    check('4 个触发器', Object.keys(triggers).length === 4, String(Object.keys(triggers).length));
+    check('触发器都是循环（末位 2）', Object.values(triggers).every(v => v.endsWith(',2')));
+    check(
+      '每个点位间隔 = 600 × 4 = 2400 秒',
+      Object.values(events).every(v => v === '13,0,2400'),
+      Object.values(events).join(' | '),
+    );
+    check('4 个 tag', Object.keys(tags).length === 4, String(Object.keys(tags).length));
+
+    const headerSize = sectionOf(map, 'Header') ?? {};
+    const W = Number(headerSize.Width);
+    const H = Number(headerSize.Height);
+
+    const siteCells = [];
+    let actionOk = true;
+    Object.values(actions).forEach((value, i) => {
+      const parts = value.split(',');
+      const waypoint = Number(parts[7]);
+      if (parts[0] !== '102' || waypoint !== 16 + i) actionOk = false;
+      const cell = parseCell(waypoints[String(waypoint)] ?? '');
+      siteCells.push(cell);
+    });
+    check('Action 102 依次指向 waypoint 16..19', actionOk, Object.values(actions).join(' | '));
+    check(
+      '点位都在图内',
+      siteCells.every(c => c.x >= 0 && c.x < W && c.y >= 0 && c.y < H),
+      `${W}x${H} · ${siteCells.map(c => `(${c.x},${c.y})`).join(' ')}`,
+    );
+    check(
+      '点位互不重复',
+      new Set(siteCells.map(c => `${c.x},${c.y}`)).size === siteCells.length,
+    );
+    check(
+      '回显 sites 与地图一致',
+      (header.sites ?? []).length === 4 &&
+        header.sites.every((s, i) => s.x === siteCells[i].x && s.y === siteCells[i].y),
+      JSON.stringify(header.sites),
+    );
+    check('出生点 waypoint 0 仍在', typeof waypoints['0'] === 'string' && waypoints['0'].length > 3);
   }
 
-  // 4. 不动超级武器
+  // 3. sites=1 回落地图正中
+  {
+    const single = await generate({ ...BASE_BODY, ionStorm: { enabled: true, sites: 1, intervalSeconds: 600 } });
+    const map = single.mapContent ?? '';
+    const header = JSON.parse(single.headers.ionStorm ?? '{}');
+    const headerSize = sectionOf(map, 'Header') ?? {};
+    const center = { x: Math.floor(Number(headerSize.Width) / 2), y: Math.floor(Number(headerSize.Height) / 2) };
+    check('sites=1：只有 1 个触发器', Object.keys(sectionOf(map, 'Triggers') ?? {}).length === 1);
+    check(
+      'sites=1：落在正中',
+      header.cell?.x === center.x && header.cell?.y === center.y,
+      `${JSON.stringify(header.cell)} vs ${JSON.stringify(center)}`,
+    );
+    check(
+      'sites=1：间隔 600',
+      Object.values(sectionOf(map, 'Events') ?? {})[0] === '13,0,600',
+      Object.values(sectionOf(map, 'Events') ?? {})[0],
+    );
+  }
+
+  // 4. randomize
+  {
+    const random = await generate({
+      ...BASE_BODY,
+      ionStorm: { enabled: true, intervalSeconds: 900, randomize: true, sites: 2 },
+    });
+    const map = random.mapContent ?? '';
+    const header = JSON.parse(random.headers.ionStorm ?? '{}');
+    check(
+      'randomize：Event 51/1800（900 × 2）',
+      Object.values(sectionOf(map, 'Events') ?? {}).every(v => v === '51,0,1800'),
+      Object.values(sectionOf(map, 'Events') ?? {}).join(' | '),
+    );
+    check('randomize：回显 eventId 51', header.eventId === 51, String(header.eventId));
+    check('randomize：平均间隔回显 900', header.intervalSeconds === 900, String(header.intervalSeconds));
+  }
+
+  // 5. 不动超级武器
   {
     const map = on.mapContent ?? '';
     const forbidden = ['GACSPH', 'GAWEAT', 'NAIRON', 'NAMISL', 'YAGNTC', 'YAPPET'];
@@ -171,11 +211,13 @@ async function run() {
     check('没有 LightningStormSpecial 段（不改闪电风暴超武定义）', sectionOf(map, 'LightningStormSpecial') === null);
   }
 
-  // 5. 参数校验
+  // 6. 参数校验
   {
     const cases = [
       [{ ...BASE_BODY, ionStorm: { enabled: true, intervalSeconds: 5 } }, 'intervalSeconds 太小'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, intervalSeconds: 9999 } }, 'intervalSeconds 太大'],
+      [{ ...BASE_BODY, ionStorm: { enabled: true, sites: 0 } }, 'sites=0'],
+      [{ ...BASE_BODY, ionStorm: { enabled: true, sites: 13 } }, 'sites=13'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, values: { damage: 0 } } }, 'values.damage=0'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, values: { nope: 1 } } }, '未知数值键'],
       [{ ...BASE_BODY, ionStorm: { enabled: 'yes' } }, 'enabled 非布尔'],
