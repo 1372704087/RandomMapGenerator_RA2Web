@@ -75,6 +75,11 @@ export interface GenerateOptions {
    * （Width+Height ≤ 1024，最大正方形 512×512；>512 时 overlay 用 1024 网格）。
    */
   vera20k?: boolean;
+  /**
+   * 随机种子（0..2147483647 的整数）。给了就复现同一张图；不给则由服务端现摇一个，
+   * 并通过响应头 `X-Map-Seed` 回给调用方，方便事后复现。
+   */
+  seed?: number;
 }
 
 /** 地图尺寸范围 */
@@ -125,4 +130,6 @@ export interface GenerateResult {
   mapContent: string;
   /** 建议的文件名（含扩展名） */
   fileName: string;
+  /** 本次实际使用的随机种子（给了就用给的，没给就是服务端临时摇的） */
+  seed?: number;
 }

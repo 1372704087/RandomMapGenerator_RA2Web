@@ -15,6 +15,7 @@ import {
   AbstractTileType,
   PreviewImage,
   Theater,
+  Random,
 } from '@ra2/core';
 import {
   getTheaterResources,
@@ -130,9 +131,16 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
   const globalRes = getGlobalResources();
   const vera20k = options.vera20k === true;
 
+  // 随机源：给了 seed 就整条链路复现，没给就按当前时间（与改造前一致）。
+  // 出生点/尺寸/损坏建筑这些「进入 WorkingMap 之前」的随机走 preRng；
+  // WorkingMap.Initialize 拿到同一个 seed 建它自己的 Randomizer；
+  // 落盘阶段的 [Lighting]/[Digest] 用第三条流（偏移过的种子），互不干扰。
+  const seed = options.seed;
+  const preRng = new Random(seed);
+
   // 在 totalRandom 模式下，随机生成玩家位置
   const playerLocations: PlayerLocations = options.totalRandom && !options.playerLocations
-    ? randomPlayerLocations()
+    ? randomPlayerLocations(preRng)
     : options.playerLocations ?? {};
 
   // 计算玩家总数
@@ -171,7 +179,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     }
   }
   if (options.totalRandom || width === 0 || height === 0) {
-    const size = randomMapSize(theater, totalPlayers);
+    const size = randomMapSize(theater, totalPlayers, preRng);
     width = size;
     height = size;
   }
@@ -188,7 +196,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
 
   // 步骤 2: 初始化地图网格
   suppressConsoleLog(() => {
-    WorkingMap.Initialize(width, height, theater.config);
+    WorkingMap.Initialize(width, height, theater.config, seed);
   });
 
 
@@ -222,8 +230,8 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
         destroyP = options.damagedBuilding.destroyP;
       } else {
         // C# 原版逻辑：随机生成损坏参数
-        dmgMin = Math.floor(Math.random() * 80) + 10;  // r.Next(10, 90)
-        dmgMax = Math.floor(Math.random() * (200 - dmgMin - 10)) + dmgMin + 10;  // r.Next(dmgMin+10, 200)
+        dmgMin = preRng.Next(10, 90);               // r.Next(10, 90)
+        dmgMax = preRng.Next(dmgMin + 10, 200);     // r.Next(dmgMin+10, 200)
         destroyP = Math.floor((100 - dmgMin) / 10) - 2;
       }
       WorkingMap.ChangeStructureHealth(dmgMin, dmgMax, destroyP);
@@ -259,6 +267,10 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
 
   // 步骤 11: 创建 MapFile 并设置属性
   const mapFile = new MapFile();
+  // 落盘阶段的随机（[Lighting] 抖动、[Digest] 摘要）用第三条流：同 seed 必得出同一份字节
+  if (seed !== undefined) {
+    mapFile.Randomizer = new Random((seed + 0x9e3779b9) & 0x7fffffff);
+  }
   mapFile.Width = WorkingMap.Width;
   mapFile.Height = WorkingMap.Height;
   mapFile.MapTheater = WorkingMap.MapTheater;
@@ -328,7 +340,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
       `fileName="${fileName}", content length=${ini.length}`,
   );
 
-  return { mapContent: ini, fileName };
+  return { mapContent: ini, fileName, seed };
 }
 
 // ---------------------------------------------------------------------------
@@ -380,9 +392,10 @@ function countPlayers(playerLocations?: PlayerLocations): number {
  *
  * 参考 C# Program.cs TotalRandom 逻辑：
  * 随机生成 0-1299 的数，根据范围决定各方向的玩家数量。
+ * @param rng 生成种子驱动的随机源（不传则按时间随机）
  */
-function randomPlayerLocations(): PlayerLocations {
-  const player = Math.floor(Math.random() * 1300);
+function randomPlayerLocations(rng: Random = new Random()): PlayerLocations {
+  const player = rng.Next(1300);
   if (player > 1200) {
     return { N: 1, SW: 1, SE: 1 };
   } else if (player > 1150) {
@@ -425,6 +438,7 @@ function randomPlayerLocations(): PlayerLocations {
 function randomMapSize(
   theater: TheaterResources,
   playerCount: number,
+  rng: Random = new Random(),
 ): number {
   const sizeConfig: TheaterSizeConfig =
     theater.sizeConfig ?? {
@@ -441,13 +455,12 @@ function randomMapSize(
     'big',
     'gigantic',
   ];
-  const categoryIndex = Math.floor(Math.random() * categories.length);
+  const categoryIndex = rng.Next(categories.length);
   const category = categories[categoryIndex];
   const range = sizeConfig[category];
 
   // 在 [min, max) 范围内随机取值
-  let size =
-    Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+  let size = rng.Next(range.min, range.max + 1);
 
   // 加上玩家人数对应的增量
   const clampedPlayers = Math.max(1, Math.min(8, playerCount));

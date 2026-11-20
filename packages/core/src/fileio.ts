@@ -13,6 +13,7 @@ import * as Format5 from './format/format5';
 import { IsoTile } from './tile/isoTile';
 import { Overlay } from './tile/overlay';
 import { Theater, Common } from './tile/enums';
+import { Random } from './random';
 
 /** Name of the INI section that stores the isometric tile pack. */
 const MapPackName = 'IsoMapPack5';
@@ -118,8 +119,9 @@ function base64Decode(str: string): Uint8Array {
 // Random helper (mirrors C# Random.Next(min, max) -> [min, max))
 // ---------------------------------------------------------------------------
 
-function randomNext(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min)) + min;
+/** 走 `MapFile.Randomizer`，这样给 MapFile 注入种子就能复现 [Lighting] / [Digest]。 */
+function randomNext(min: number, max: number, rng: Random): number {
+    return rng.Next(min, max);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +144,12 @@ export class MapFile {
     public Waypoint: IniSection = new IniSection('Waypoints');
 
     public LocalSize: number[] = [0, 0];
+
+    /**
+     * 落盘阶段用到的随机源：[Digest] 的随机摘要、[Lighting] 的光照抖动都从这里取数。
+     * 注入带种子的 Random 即可让产出逐字节复现；默认不传种子（Date.now()）。
+     */
+    public Randomizer: Random = new Random();
 
     /**
      * Parse the [IsoMapPack5] section of a map INI and populate
@@ -391,7 +399,7 @@ export class MapFile {
 
         const digest = new Uint8Array(20);
         for (let i = 0; i < 20; i++) {
-            digest[i] = randomNext(0, 16);
+            digest[i] = randomNext(0, 16, this.Randomizer);
         }
         section.SetStringValue('1', base64Encode(digest));
 
@@ -672,20 +680,20 @@ export class MapFile {
         const [ionGreen1, ionGreen2] = settings.IonGreen;
         const [ionBlue1, ionBlue2] = settings.IonBlue;
 
-        let ambient = randomNext(ambient1, ambient2) / 10000.0;
-        if (randomNext(1, 1000) > 700) {
-            ambient = randomNext(ambient1 - 1500, ambient2 - 500) / 10000.0;
+        let ambient = randomNext(ambient1, ambient2, this.Randomizer) / 10000.0;
+        if (randomNext(1, 1000, this.Randomizer) > 700) {
+            ambient = randomNext(ambient1 - 1500, ambient2 - 500, this.Randomizer) / 10000.0;
         }
-        const level = randomNext(level1, level2) / 10000.0;
-        const red = randomNext(red1, red2) / 10000.0;
-        const green = randomNext(green1, green2) / 10000.0;
-        const blue = randomNext(blue1, blue2) / 10000.0;
+        const level = randomNext(level1, level2, this.Randomizer) / 10000.0;
+        const red = randomNext(red1, red2, this.Randomizer) / 10000.0;
+        const green = randomNext(green1, green2, this.Randomizer) / 10000.0;
+        const blue = randomNext(blue1, blue2, this.Randomizer) / 10000.0;
 
-        const wambient = randomNext(ionAmbient1, ionAmbient2) / 10000.0;
-        const wlevel = randomNext(ionLevel1, ionLevel2) / 10000.0;
-        const wred = randomNext(ionRed1, ionRed2) / 10000.0;
-        const wgreen = randomNext(ionGreen1, ionGreen2) / 10000.0;
-        const wblue = randomNext(ionBlue1, ionBlue2) / 10000.0;
+        const wambient = randomNext(ionAmbient1, ionAmbient2, this.Randomizer) / 10000.0;
+        const wlevel = randomNext(ionLevel1, ionLevel2, this.Randomizer) / 10000.0;
+        const wred = randomNext(ionRed1, ionRed2, this.Randomizer) / 10000.0;
+        const wgreen = randomNext(ionGreen1, ionGreen2, this.Randomizer) / 10000.0;
+        const wblue = randomNext(ionBlue1, ionBlue2, this.Randomizer) / 10000.0;
 
         lighting.SetStringValue('Ambient', ambient.toFixed(6));
         lighting.SetStringValue('Level', level.toFixed(6));

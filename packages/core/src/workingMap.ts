@@ -39,6 +39,9 @@ import { Terrain } from './objects/terrain';
 import { Aircraft } from './objects/aircraft';
 import { Smudge } from './objects/smudge';
 import { Waypoint } from './objects/waypoint';
+import { Random } from './random';
+
+export { Random } from './random';
 
 // ---------------------------------------------------------------------------
 // Configuration interface
@@ -61,45 +64,8 @@ export interface WorkingMapConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Seedable Random (linear congruential generator)
+// Seedable Random —— 实现搬到 ./random.ts（fileio 也要用，避免循环引用）
 // ---------------------------------------------------------------------------
-
-/**
- * Seedable pseudo-random number generator.
- *
- * Mirrors the public API of C# System.Random:
- *   - Next(max)        -> [0, max)
- *   - Next(min, max)   -> [min, max)
- *   - NextDouble()     -> [0, 1)
- *
- * Uses a linear congruential generator so that results are reproducible
- * when a seed is supplied.
- */
-export class Random {
-  private state: number;
-
-  constructor(seed?: number) {
-    this.state = (seed ?? Date.now()) & 0x7fffffff;
-  }
-
-  private next(): number {
-    // LCG constants (same family as glibc / ANSI C)
-    this.state = (this.state * 1103515245 + 12345) & 0x7fffffff;
-    return this.state / 0x80000000; // [0, 1)
-  }
-
-  public NextDouble(): number {
-    return this.next();
-  }
-
-  /** Next(max) -> [0, max)  or  Next(min, max) -> [min, max) */
-  public Next(minOrMax: number, max?: number): number {
-    if (max === undefined) {
-      return Math.floor(this.next() * minOrMax);
-    }
-    return Math.floor(this.next() * (max - minOrMax)) + minOrMax;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Weighted randomizer (replaces C# Weighted_Randomizer.DynamicWeightedRandomizer)
@@ -312,11 +278,13 @@ export class WorkingMap {
    * @param width  地图宽度
    * @param height 地图高度
    * @param config 包含 settings/rules/art 文件内容的配置对象
+   * @param seed   可选随机种子；同种子 ⇒ 同一串随机取值（逐字节复现）。不传则用 Date.now()
    */
   public static Initialize(
     width: number,
     height: number,
     config: WorkingMapConfig,
+    seed?: number,
   ): void {
     const settings = new IniFile(config.settingsContent);
 
@@ -368,7 +336,7 @@ export class WorkingMap {
     WorkingMap.SmudgeList = [];
     WorkingMap.OverlayList = [];
     WorkingMap.WaypointList = [];
-    WorkingMap.Randomizer = new Random();
+    WorkingMap.Randomizer = new Random(seed);
 
     WorkingMap.Rules = new IniFile(config.rulesContent);
     WorkingMap.Art = new IniFile(config.artContent);

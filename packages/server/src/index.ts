@@ -26,7 +26,7 @@ import {
 } from './resourceLoader';
 import { generateMap } from './generator';
 import { splitFullMap, splitSpawnUnitsForTheater, detectTheater, buildTheaterWarnings } from './splitter';
-import { renderMapPreview } from '@ra2/core';
+import { renderMapPreview, Random } from '@ra2/core';
 import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
 import { putMap, getMap } from './mapHandoff';
@@ -142,6 +142,10 @@ app.post(
       }
 
       // 生成地图
+      // 种子：调用方没给就现摇一个，再原样回给调用方（X-Map-Seed），方便复现同一张图
+      if (options.seed === undefined) {
+        options.seed = new Random().Seed;
+      }
       const result = await generateMap(options);
 
       // 设置响应头，返回文件
@@ -157,7 +161,8 @@ app.post(
       res.setHeader('Content-Length', Buffer.byteLength(result.mapContent, 'utf-8'));
       // 预览时凭这个 key 取回原文，省掉前端再上传一次几 MB 的地图文本
       res.setHeader('X-Map-Key', putMap(result.mapContent));
-      res.setHeader('Access-Control-Expose-Headers', 'X-Map-Key, Content-Disposition');
+      res.setHeader('X-Map-Seed', String(options.seed));
+      res.setHeader('Access-Control-Expose-Headers', 'X-Map-Key, X-Map-Seed, Content-Disposition');
 
       res.send(result.mapContent);
     } catch (err) {
@@ -583,6 +588,18 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
     (!Number.isInteger(options.height) || options.height < 0)
   ) {
     return 'height must be a non-negative integer (0 for random)';
+  }
+
+  // 种子：可选，必须是 31 位非负整数（内部 RNG 状态就是 31 位）
+  if (options.seed !== undefined) {
+    if (
+      typeof options.seed !== 'number' ||
+      !Number.isInteger(options.seed) ||
+      options.seed < 0 ||
+      options.seed > 0x7fffffff
+    ) {
+      return 'seed must be an integer in 0..2147483647';
+    }
   }
 
   // totalRandom 模式下不需要 playerLocations

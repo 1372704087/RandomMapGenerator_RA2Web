@@ -23,6 +23,8 @@ type GenerateRequest = {
   smudge: number;
   /** VERA20k 适配：30 人 + 大图（width+height ≤ 1024） */
   vera20k: boolean;
+  /** 随机种子；留空则由服务端现摇一个并通过 X-Map-Seed 回显 */
+  seed?: number;
 };
 
 type Status =
@@ -138,6 +140,10 @@ export default function GeneratePage() {
   const [damageMax, setDamageMax] = useState(50);
   const [destroyP, setDestroyP] = useState(5);
   const [smudge, setSmudge] = useState(0);
+  /** 随机种子（字符串保存，空 = 交给服务端摇）；同种子 ⇒ 逐字节相同的地图 */
+  const [seedInput, setSeedInput] = useState('');
+  /** 最近一次生成实际用的种子（服务端用 X-Map-Seed 回显，便于复现） */
+  const [lastSeed, setLastSeed] = useState<number | null>(null);
 
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -263,6 +269,12 @@ export default function GeneratePage() {
     if (theaters.length === 0) return '没有可用的地图类型，请检查后端服务';
     if (!theaterType) return '请选择地图类型';
     if (!mapName.trim()) return '地图名称不能为空';
+    if (seedInput.trim()) {
+      const n = Number(seedInput.trim());
+      if (!Number.isInteger(n) || n < 0 || n > 0x7fffffff) {
+        return '随机种子需为 0-2147483647 的整数（留空则随机）';
+      }
+    }
     if (vera20k) {
       if (totalRandom) return 'VERA20k 模式不支持完全随机';
       if (width === 0 || height === 0) return 'VERA20k 模式需要指定宽高（默认 500×500）';
@@ -390,7 +402,8 @@ export default function GeneratePage() {
       damagedBuilding: damageEnabled ? { min: damageMin, max: damageMax, destroyP } : false,
       totalRandom: isRandom,
       smudge,
-      vera20k
+      vera20k,
+      ...(seedInput.trim() ? { seed: Number(seedInput.trim()) } : {})
     };
 
     setStatus({ kind: 'loading' });
@@ -439,6 +452,9 @@ export default function GeneratePage() {
         .catch(() => setGenPreview(null));
 
       setStatus({ kind: 'success', message: `地图已生成: ${filename}` });
+      // 服务端回显本次实际使用的种子：留空生成时也拿它复现同一张图
+      const seedHeader = res.headers.get('X-Map-Seed');
+      if (seedHeader) setLastSeed(Number(seedHeader));
       // 后端把地图原文留在内存里并回了 X-Map-Key：预览凭 key 取，不必重传整张图
       const mapKey = res.headers.get('X-Map-Key');
       void startCncmapsPreview(mapKey ? { mapKey } : mapText, filename);
@@ -547,6 +563,24 @@ export default function GeneratePage() {
                 <option key={g.value} value={g.value}>{g.label}</option>
               ))}
             </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="seed">随机种子</label>
+            <input
+              id="seed"
+              type="number"
+              min={0}
+              max={0x7fffffff}
+              step={1}
+              value={seedInput}
+              onChange={e => setSeedInput(e.target.value)}
+              placeholder="留空 = 随机"
+            />
+            <span className="field-hint">
+              同种子 ⇒ 逐字节相同的地图；留空由服务端摇一个并回显
+              {lastSeed !== null ? `（上一张 seed=${lastSeed}）` : ''}
+            </span>
           </div>
 
           <div className="field">
