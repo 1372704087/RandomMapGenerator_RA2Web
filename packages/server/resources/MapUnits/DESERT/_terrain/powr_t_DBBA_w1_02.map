@@ -523,6 +523,6 @@ PlayerControl=no
 0=Neutral,CAML,256,32,28,1,Guard,64,None,0,-1,0,1,0
 
 [Structures]
-0=Neutral,CAPOWR,256,21,20,64,None,0,0,1,0,0,None,None,None,1,0
+0=Neutral,CASLAB,256,20,22,0,None,0,0,1,0,0,None,None,None,0,0
 
 

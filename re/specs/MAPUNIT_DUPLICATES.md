@@ -71,8 +71,8 @@ G:\红色警戒II启动器3.0\文件\RA2YRdata\RandomMapGenerator_RA2\MapUnits\D
 | 文件 | 字节 | sha1 前 12 | 接口四元组 | weight | ztop |
 |---|---|---|---|---|---|
 | `bhut_t_CCBB_w1_02.map` | 21320 | `b3cc0c21ebed` | 962,962,961,961 | 1 | 8 |
-| `powr_t_DBBA_w1_02.map` | 20923 | `42fa4d7488ab` | 963,961,961,960 | 1 | 9 |
-| `trees_t_BBCC_w1_02.map` | 21254 | `74b6b03f9c14` | 961,961,962,962 | 1 | 10 |
+| `powr_t_DBBA_w1_02.map` | 20922 | `6616a4a2d4d9` | 963,961,961,960 | 1 | 9 |
+| `trees_t_BBCC_w1_02.map` | 21336 | `877b2132c824` | 961,961,962,962 | 1 | 10 |
 
 三条不变量全部保住：接口四元组 / weight 指示块 / ztop 与原盘一致，`weight` 仍是 1，所以三组的真实出现概率仍是 2。
 
@@ -86,19 +86,32 @@ G:\红色警戒II启动器3.0\文件\RA2YRdata\RandomMapGenerator_RA2\MapUnits\D
 
 三份 `_02` 都**没有** 255 空白格。
 
-### 编辑器顺带改坏的结构体（已还原）
+### 编辑器顺带改动的结构体（**用户有意保留**）
 
-编辑器保存时动了两处 `[Structures]`，这与「换贴图」无关，会改变实际产出：
+编辑器保存时动了两处 `[Structures]`。复现时先按「贴图不该带动结构」的默认口径还原过一版
+（`d960938`），经用户确认**这两处是他有意要的**，已换回：
 
-* `powr_02`：原盘 `0=Neutral,CAPOWR,256,21,20,64,…`（一座电厂）被写成
-  `0=Neutral,CASLAB,256,20,22,0,…`（一片水泥台）。后果是 DESERT 的 power 切片不再放电厂 —— 实测
-  生成图里 `CAPOWR` 计数掉到 0、平白多出一块 `CASLAB`。已还原成 `CAPOWR@21,20,64`。
-* `trees_02`：原盘该单元**没有** `[Structures]`，被塞进
-  `0=Neutral,CABUNK02,256,27,26,0,…`（一个掩体）。后果是每个树丛切片都会附带刷一座掩体。已整段删除。
-  （`bhut_02` 的两座 `CABHUT` 与原盘逐字一致，未动。）
+* `powr_02`：原盘 `0=Neutral,CAPOWR,256,21,20,64,…`（一座电厂）→ 现在
+  `0=Neutral,CASLAB,256,20,22,0,…`（一片水泥台）。该组 power 切片按 `_02` 的版本不再产出电厂。
+* `trees_02`：原盘该单元**没有** `[Structures]` → 现在多出
+  `0=Neutral,CABUNK02,256,27,26,0,…`（一个掩体），即每片树丛附带刷一座掩体。
+* `bhut_02` 的两座 `CABHUT` 与原盘逐字一致，未动。
 
-还原只动这两处文本，`IsoMapPack5` / `OverlayPack` / `OverlayDataPack` 三段的 sha1 在还原前后完全相同，
-即贴图改动原样保留。还原前的文件留在 `scratch/edit_backup/*.before-fix.map`。
+这两个结构改动不影响三条不变量（接口 / weight / ztop），三组出现概率仍是 2，只是这组切片
+产出的建筑换了。实测 20 张 77×85 DESERT 图的 `[Structures]` 分布：
+
+| 类型 | 20 张总计 | 平均/张 | 备注 |
+|---|---|---|---|
+| `CASLAB` | 13 | 0.65 | 含 `powr_02`、`army_t_FAFA`、`bhut_t_DDEE`、`slab_t_DEDD` 多处来源 |
+| `CABUNK02` | 6（6/20 张出现） | 0.30 | 含 `trees_02` 与新加的和原有 4 份 `bunk_*` 切片 |
+| `CAPOWR` | 5 | 0.25 | `powr_02` 已不含电厂，只剩 `powr_01` 等其它来源 |
+| `CABHUT` | 43 | 2.15 | |
+
+注意**命名会滞后**：`labelOf()` 取主导结构名，所以索引里 `powr_t_DBBA_w1_02` 的主导类型现在是
+`slab`、`trees_t_BBCC_w1_02` 是 `bunk`，但文件名前缀仍是 `powr` / `trees`。要名字对齐可改成
+`slab_t_DBBA_w1_02.map` / `bunk_t_BBCC_w1_02.map`（DESERT 现有 `slab_t_DEDD`、`bunk_t_BDCD/DDDE/EBBA/EEED`，
+code4 不冲突）。
+
 
 ### 每份 `_02` 都少 1 格边缘格（保留现状）
 

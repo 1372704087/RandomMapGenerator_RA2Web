@@ -524,4 +524,7 @@ PlayerControl=no
 26022=TREE28
 42035=TREE29
 
+[Structures]
+0=Neutral,CABUNK02,256,27,26,0,None,0,0,1,0,0,None,None,None,0,0
+
 
