@@ -8,8 +8,8 @@ DESERT,DESERT/_terrain/army_t_DBBF_w1_01.map,army_t_DBBF_w1_01.map,terrain,DBBF,
 DESERT,DESERT/_terrain/army_t_FAFA_w1_01.map,army_t_FAFA_w1_01.map,terrain,FAFA,965,960,965,960,1,20938,d2eafb1edfd18f46c68331dfd0754f8b805123c1,2,3,12,0,army,5,army,
 DESERT,DESERT/_terrain/barr_t_EEEE_w2_01.map,barr_t_EEEE_w2_01.map,terrain,EEEE,964,964,964,964,2,21504,68b1105fde8b80a1e1801eb5678489a704da00d8,5,0,12,0,barr,12,barr,
 DESERT,DESERT/_terrain/bhut_t_BBAA_w1_01.map,bhut_t_BBAA_w1_01.map,terrain,BBAA,961,961,960,960,1,21519,5da3681217fa40dfa96f184f2f2c3cc8fb98c42a,7,7,12,1,bhut,8,bhut,
-DESERT,DESERT/_terrain/bhut_t_CCBB_w1_01.map,bhut_t_CCBB_w1_01.map,terrain,CCBB,962,962,961,961,1,20950,9cdb0b88096cdc563c4dc32a85aa46e611c209ce,2,3,12,0,bhut,8,bhut,
-DESERT,DESERT/_terrain/bhut_t_CCBB_w1_02.map,bhut_t_CCBB_w1_02.map,terrain,CCBB,962,962,961,961,1,20950,9cdb0b88096cdc563c4dc32a85aa46e611c209ce,2,3,12,0,bhut,8,bhut,
+DESERT,DESERT/_terrain/bhut_t_CCBB_w1_01.map,bhut_t_CCBB_w1_01.map,terrain,CCBB,962,962,961,961,1,20950,9cdb0b88096cdc563c4dc32a85aa46e611c209ce,2,3,12,0,bhut,8,bhut,DESERT-D1
+DESERT,DESERT/_terrain/bhut_t_CCBB_w1_02.map,bhut_t_CCBB_w1_02.map,terrain,CCBB,962,962,961,961,1,20950,9cdb0b88096cdc563c4dc32a85aa46e611c209ce,2,3,12,0,bhut,8,bhut,DESERT-D1
 DESERT,DESERT/_terrain/bhut_t_DDEE_w1_01.map,bhut_t_DDEE_w1_01.map,terrain,DDEE,963,963,964,964,1,20971,c18a462316fe5d09d235f0ea8d73b9bd423d96b7,4,3,12,0,bhut,12,bhut,
 DESERT,DESERT/_terrain/bhut_t_EDDE_w1_01.map,bhut_t_EDDE_w1_01.map,terrain,EDDE,964,963,963,964,1,20903,8b41f702c83154f00714b730700ab934e54dd894,3,4,12,0,bhut,12,bhut,
 DESERT,DESERT/_terrain/bhut_t_EDEE_w1_01.map,bhut_t_EDEE_w1_01.map,terrain,EDEE,964,963,964,964,1,21230,01cad2f280e8b4b746e7505219cbd00e90ece303,3,2,12,0,bhut,12,bhut,
@@ -35,8 +35,8 @@ DESERT,DESERT/_terrain/oild_t_BEAB_w1_01.map,oild_t_BEAB_w1_01.map,terrain,BEAB,
 DESERT,DESERT/_terrain/oild_t_CABA_w1_03.map,oild_t_CABA_w1_03.map,terrain,CABA,962,960,961,960,1,20635,2307d9aa139c554ed5437a16a557d01040ee500f,1,2,12,0,oild,10,oild,
 DESERT,DESERT/_terrain/oild_t_EEDE_w2_01.map,oild_t_EEDE_w2_01.map,terrain,EEDE,964,964,963,964,2,21127,41a6664a232968c2e71c1ee901a844e5175f9f2a,1,3,16,0,oild,12,oild,
 DESERT,DESERT/_terrain/ovl_t_DDBB_w1_01.map,ovl_t_DDBB_w1_01.map,terrain,DDBB,963,963,961,961,1,20807,4051ac7834047ee354116b1eb14863d2ac9a611c,0,0,12,0,,10,ovl,
-DESERT,DESERT/_terrain/powr_t_DBBA_w1_01.map,powr_t_DBBA_w1_01.map,terrain,DBBA,963,961,961,960,1,21204,9ab383b2a59dcbcfdb6060de3326f401baa107b1,1,5,16,1,powr,9,powr,
-DESERT,DESERT/_terrain/powr_t_DBBA_w1_02.map,powr_t_DBBA_w1_02.map,terrain,DBBA,963,961,961,960,1,21204,9ab383b2a59dcbcfdb6060de3326f401baa107b1,1,5,16,1,powr,9,powr,
+DESERT,DESERT/_terrain/powr_t_DBBA_w1_01.map,powr_t_DBBA_w1_01.map,terrain,DBBA,963,961,961,960,1,21204,9ab383b2a59dcbcfdb6060de3326f401baa107b1,1,5,16,1,powr,9,powr,DESERT-D2
+DESERT,DESERT/_terrain/powr_t_DBBA_w1_02.map,powr_t_DBBA_w1_02.map,terrain,DBBA,963,961,961,960,1,21204,9ab383b2a59dcbcfdb6060de3326f401baa107b1,1,5,16,1,powr,9,powr,DESERT-D2
 DESERT,DESERT/_terrain/powr_t_DDDD_w2_01.map,powr_t_DDDD_w2_01.map,terrain,DDDD,963,963,963,963,2,20671,8239116fcaca237abe4e41052a1033cb5c489cbc,1,6,17,0,powr,12,powr,
 DESERT,DESERT/_terrain/powr_t_EDDD_w1_01.map,powr_t_EDDD_w1_01.map,terrain,EDDD,964,963,963,963,1,20996,46dd0a607c7baab2eaa86561935dac973fa2cc7d,1,4,15,0,powr,12,powr,
 DESERT,DESERT/_terrain/slab_t_DEDD_w2_01.map,slab_t_DEDD_w2_01.map,terrain,DEDD,963,964,963,963,2,21140,19855b78efc4060d979c673843d489040b9d4aa6,1,3,12,1,slab,12,slab,
@@ -72,8 +72,8 @@ DESERT,DESERT/_terrain/trees_t_AFAA_w1_01.map,trees_t_AFAA_w1_01.map,terrain,AFA
 DESERT,DESERT/_terrain/trees_t_AFAF_w1_02.map,trees_t_AFAF_w1_02.map,terrain,AFAF,960,965,960,965,1,20838,93d5500bc02638507ab86caea53e7673f279fa8d,0,2,12,0,,4,trees,
 DESERT,DESERT/_terrain/trees_t_AFFA_w1_01.map,trees_t_AFFA_w1_01.map,terrain,AFFA,960,965,965,960,1,21058,8e20b3fda750f982fec31dece4f7aa2b25027d9d,0,2,17,0,,5,trees,
 DESERT,DESERT/_terrain/trees_t_BBAA_w1_03.map,trees_t_BBAA_w1_03.map,terrain,BBAA,961,961,960,960,1,20638,14b003327ce0f6fc410541d20cc7074680e0cada,0,2,12,0,,8,trees,
-DESERT,DESERT/_terrain/trees_t_BBCC_w1_01.map,trees_t_BBCC_w1_01.map,terrain,BBCC,961,961,962,962,1,21182,dcf7603262d8de00f0c2be74f245d05b594ce058,0,3,19,0,,10,trees,
-DESERT,DESERT/_terrain/trees_t_BBCC_w1_02.map,trees_t_BBCC_w1_02.map,terrain,BBCC,961,961,962,962,1,21182,dcf7603262d8de00f0c2be74f245d05b594ce058,0,3,19,0,,10,trees,
+DESERT,DESERT/_terrain/trees_t_BBCC_w1_01.map,trees_t_BBCC_w1_01.map,terrain,BBCC,961,961,962,962,1,21182,dcf7603262d8de00f0c2be74f245d05b594ce058,0,3,19,0,,10,trees,DESERT-D3
+DESERT,DESERT/_terrain/trees_t_BBCC_w1_02.map,trees_t_BBCC_w1_02.map,terrain,BBCC,961,961,962,962,1,21182,dcf7603262d8de00f0c2be74f245d05b594ce058,0,3,19,0,,10,trees,DESERT-D3
 DESERT,DESERT/_terrain/trees_t_BDAB_w1_01.map,trees_t_BDAB_w1_01.map,terrain,BDAB,961,963,960,961,1,20787,a68d1838bb558eff2bc717a35867632d718e64d0,0,2,12,1,,9,trees,
 DESERT,DESERT/_terrain/trees_t_BDAB_w1_02.map,trees_t_BDAB_w1_02.map,terrain,BDAB,961,963,960,961,1,20917,a1df1a9539e2824b907d2a02fa6c46184ffefe16,0,7,12,0,,8,trees,
 DESERT,DESERT/_terrain/trees_t_BDFB_w1_01.map,trees_t_BDFB_w1_01.map,terrain,BDFB,961,963,965,961,1,20724,51eaae132067dfe643a92873533da8fb0cc78e21,0,2,12,0,,10,trees,

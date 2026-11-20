@@ -28,10 +28,16 @@ const q = (v) => {
 
 function buildCsv() {
   const { theaters, units } = scanAll();
+  // `scanAll()` 的单元对象用 camelCase（`dupGroup`），CSV 列是 snake_case，
+  // 直接 `u[c]` 取会拿到 undefined，导致「重复件」这一列永远是空的。
+  const cell = (u, c) => {
+    if (c === 'dup_group') return u.dupGroup;
+    return u[c];
+  };
   const rows = units
     .slice()
     .sort((a, b) => a.theater.localeCompare(b.theater) || a.file.localeCompare(b.file, 'en', { numeric: true }))
-    .map((u) => COLUMNS.map((c) => q(u[c])).join(','));
+    .map((u) => COLUMNS.map((c) => q(cell(u, c))).join(','));
   return { theaters, units, csv: [COLUMNS.join(','), ...rows].join('\n') + '\n' };
 }
 
