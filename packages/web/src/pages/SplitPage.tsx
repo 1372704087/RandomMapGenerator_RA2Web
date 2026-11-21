@@ -32,6 +32,7 @@ const THEATER_LABELS: Record<string, string> = {
   DESERT: '沙漠 DESERT',
   NEWURBAN: '新城市 NEWURBAN',
   SNOW: '雪地 SNOW',
+  SNOW_Islands: '雪地岛屿 SNOW_Islands',
   TEMPERATE: '温带 TEMPERATE',
   TEMPERATE_Islands: '温带岛屿 TEMPERATE_Islands'
 };

@@ -69,15 +69,20 @@ node scripts/mapunit-rename.mjs --apply    # 执行改名
 
 脚本内置校验：同 theater 内新名唯一（大小写不敏感）、地形件名不含 `spawn`/`tiberium`、语义词件名含对应词、文件名无非法字符；任一不满足直接退出。
 
-## 五、当前分布（2026-11-19 改名后）
+## 五、当前分布（2026-11-21，含雪地岛屿）
 
 | theater | 件 | 地形 | 权重分布 | 重复 |
 |---|---|---|---|---|
 | DESERT | 91 | 80 | `{1:71, 2:9}` | 6（3 组） |
 | NEWURBAN | 65 | 53 | `{1:49, 2:3, 4:1}` | 0 |
 | SNOW | 63 | 59 | `{1:20, 2:2, 3:25, 4:10, 9:2}` | 0 |
+| SNOW_Islands | 39 | 31 | `{1:16, 2:15}` | 0 |
 | TEMPERATE | 63 | 59 | `{1:20, 2:2, 3:25, 4:10, 9:2}` | 0 |
 | TEMPERATE_Islands | 39 | 31 | `{1:16, 2:15}` | 0 |
+
+> SNOW_Islands 由 `scripts/mapunit-retheater.mjs` 从 TEMPERATE_Islands 做 tile 重映射生成
+> （温/雪 tileset 扁平索引：0..30 恒等，31 起雪地插 Ice 系列错位、按 set 语义配对），
+> 接口码/权重与温带版逐件一致；同时改写单元内嵌 `[Map] Theater=SNOW`。
 
 label 分布：`trees×105`、`spawn×26`、`newy×22`、`ovl×19`、`bhut×17`、`oild×14`、`bunk×13`、`park×12`、`farm×9`、`tiberium×8`、`mach×8`、`airp×8`，其余 20 类均 ≤6。
 
