@@ -40,6 +40,7 @@ import {
   ALL_DIRECTIONS,
   TheaterSizeConfig,
   LightingResult,
+  LayoutResult,
 } from './types';
 
 /**
@@ -268,12 +269,70 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
   restoreCachedMapUnits(theater);
 
   // 步骤 4: 放置玩家出生点
+  // 4a. 对称布局：先放 a 侧，记下它真正落下的 abs 单元，再把"点对称后的格子"
+  //     直接塞给 b 侧（逐格落子），这样不会因为相邻格被占而漂移。
+  const mirroredPairs: string[] = [];
+  let mirroredStarts = 0;
+  let orePlaced: Array<[number, number]> = [];
+  const mirrorPairs: Array<[Direction, Direction]> = [];
+  if (options.symmetry === 'mirror') {
+    const pairs: Array<[Direction, Direction]> = [
+      ['N', 'S'],
+      ['W', 'E'],
+      ['NW', 'SE'],
+      ['NE', 'SW'],
+    ];
+    for (const [a, b] of pairs) {
+      const countA = playerLocations[a] ?? 0;
+      const countB = playerLocations[b] ?? 0;
+      // 只配对"两边人数相等且都大于 0"的方向
+      if (countA > 0 && countA === countB) {
+        mirrorPairs.push([a, b]);
+      }
+    }
+  }
+  const mirrorTargetSide = new Set<Direction>(mirrorPairs.map((p) => p[1]));
   suppressConsoleLog(() => {
+    const spawnCells: Partial<Record<Direction, Array<[number, number]>>> = {};
+
     for (const dir of ALL_DIRECTIONS) {
       const count = playerLocations[dir] ?? 0;
-      if (count > 0) {
-        WorkingMap.PlacePlayerLocation(count, dir);
+      if (count <= 0 || mirrorTargetSide.has(dir)) {
+        continue; // 对侧等第一轮放完再镜像过来
       }
+      WorkingMap.SpawnCellCapture = [];
+      WorkingMap.PlacePlayerLocation(count, dir);
+      spawnCells[dir] = (WorkingMap.SpawnCellCapture ?? []).slice(0, count);
+      WorkingMap.SpawnCellCapture = null;
+    }
+
+    // 第二遍：把 a 侧的落点镜像给 b 侧
+    for (const [a, b] of mirrorPairs) {
+      const countB = playerLocations[b] ?? 0;
+      const cellsA = spawnCells[a] ?? [];
+      if (cellsA.length === 0) {
+        continue;
+      }
+      const mirroredCells = cellsA.map(
+        ([x, y]) => WorkingMap.MirrorAbsLocation([x, y]) as [number, number],
+      );
+      WorkingMap.PlayerSpawnCellOverrides[b] = mirroredCells;
+      WorkingMap.SpawnCellCapture = [];
+      WorkingMap.PlacePlayerLocation(countB, b);
+      spawnCells[b] = (WorkingMap.SpawnCellCapture ?? []).slice(0, countB);
+      WorkingMap.SpawnCellCapture = null;
+      if ((spawnCells[b] ?? []).length > 0) {
+        mirroredPairs.push(`${a}->${b}`);
+        mirroredStarts += (spawnCells[b] ?? []).length;
+      }
+    }
+    WorkingMap.PlayerSpawnCellOverrides = {};
+
+    // 步骤 4b: 矿脉布局（在铺地形之前占位，否则地形填满后没有空格可放矿石）
+    if (options.oreLayout && options.oreLayout !== 'default') {
+      orePlaced = suppressConsoleLog(() =>
+        WorkingMap.PlaceOreLayout(options.oreLayout as 'center' | 'corners'),
+      );
     }
 
     // 步骤 5-7: 放置地图单元
@@ -417,6 +476,20 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
 
   const fileName = `${mapName}.${globalRes.outputExtension}`;
 
+  // 对局布局回显：只要请求里出现 symmetry / oreLayout 就回，方便前端做"上一张"校验
+  const layoutRequested =
+    options.symmetry === 'mirror' || options.oreLayout !== undefined;
+  const layout: LayoutResult | undefined = layoutRequested
+    ? {
+        symmetry: options.symmetry === 'mirror' ? 'mirror' : 'none',
+        oreLayout: options.oreLayout ?? 'default',
+        mirroredPairs,
+        mirroredStarts,
+        oreCells: orePlaced.length,
+        oreCellsTotal: WorkingMap.CountTiberiumCells(),
+      }
+    : undefined;
+
   console.log(
     `[generator] Map generated: ${mapFile.Width}x${mapFile.Height}, ` +
       `fileName="${fileName}", content length=${ini.length}`,
@@ -429,6 +502,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     lighting: lightingStep.lighting,
     ionStorm: ionStormStep.ionStorm,
     dayNight: dayNightStep.dayNight,
+    layout,
   };
 }
 

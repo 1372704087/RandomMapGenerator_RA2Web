@@ -251,9 +251,13 @@ app.post(
           }),
         );
       }
+      if (result.layout) {
+        // 对局布局回显：对称配对是否生效、额外铺了多少矿石
+        res.setHeader('X-Map-Layout', JSON.stringify(result.layout));
+      }
       res.setHeader(
         'Access-Control-Expose-Headers',
-        'X-Map-Key, X-Map-Seed, X-Map-Lighting, X-Map-IonStorm, X-Map-DayNight, Content-Disposition',
+        'X-Map-Key, X-Map-Seed, X-Map-Lighting, X-Map-IonStorm, X-Map-DayNight, X-Map-Layout, Content-Disposition',
       );
 
       res.send(result.mapContent);
@@ -712,6 +716,12 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
     return dayNightError;
   }
 
+  // 对局布局（对称 / 矿脉）：可选，给了就得是合法取值
+  const layoutError = validateLayoutRequest(options as unknown as Record<string, unknown>);
+  if (layoutError) {
+    return layoutError;
+  }
+
   // totalRandom 模式下不需要 playerLocations
   if (!options.totalRandom) {
     if (!options.playerLocations || typeof options.playerLocations !== 'object') {
@@ -1002,6 +1012,35 @@ function validateDayNightRequest(dayNight: DayNightRequest | undefined): string 
     return 'dayNight.retint must be a boolean';
   }
 
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// 对局布局校验
+// ---------------------------------------------------------------------------
+
+/**
+ * 校验对局布局入参（`symmetry` / `oreLayout`）。
+ *
+ * 错误文案固定（验收脚本按这些字符串断言）：
+ * - `symmetry must be "none" or "mirror"`
+ * - `oreLayout must be "default", "center" or "corners"`
+ */
+function validateLayoutRequest(body: Record<string, unknown>): string | null {
+  if (body.symmetry !== undefined) {
+    if (body.symmetry !== 'none' && body.symmetry !== 'mirror') {
+      return 'symmetry must be "none" or "mirror"';
+    }
+  }
+  if (body.oreLayout !== undefined) {
+    if (
+      body.oreLayout !== 'default' &&
+      body.oreLayout !== 'center' &&
+      body.oreLayout !== 'corners'
+    ) {
+      return 'oreLayout must be "default", "center" or "corners"';
+    }
+  }
   return null;
 }
 

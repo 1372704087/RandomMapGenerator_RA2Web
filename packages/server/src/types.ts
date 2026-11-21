@@ -100,6 +100,33 @@ export interface GenerateOptions {
    * 不传/`enabled:false` = 只写静态光照，不做循环。
    */
   dayNight?: DayNightRequest;
+
+  /**
+   * 对局公平性：`mirror` = 对侧出生点按点对称（180°）配对放置，`none`/不传 = 原版各方向独立落点。
+   * 只在"对向玩家数相等"的配对上生效（如 N=1/S=1、NW=2/SE=2）。
+   */
+  symmetry?: 'none' | 'mirror';
+
+  /**
+   * 矿脉布局：`default` = 原版（只在出生点附近撒矿）；
+   * `center` = 地图正中铺一大片富矿（抢中心）；
+   * `corners` = 四角各一小片贫矿（长期消耗）。
+   */
+  oreLayout?: 'default' | 'center' | 'corners';
+}
+
+/** 对局布局的回显（`X-Map-Layout`）。 */
+export interface LayoutResult {
+  symmetry: 'none' | 'mirror';
+  oreLayout: 'default' | 'center' | 'corners';
+  /** 实际镜像生效的配对方向（如 `N→S`），空 = 没有可配对的等数量对向。 */
+  mirroredPairs: string[];
+  /** 走镜像锚点放置的出生点数。 */
+  mirroredStarts: number;
+  /** 额外铺下的矿石块数（每块 ≈ 一个 25×25 模板）。 */
+  oreCells: number;
+  /** 整张图当前的矿石块总数（含出生点附近的常规矿）。 */
+  oreCellsTotal: number;
 }
 
 /** 地图尺寸范围 */
@@ -320,4 +347,6 @@ export interface GenerateResult {
   ionStorm?: IonStormResult;
   /** 本次实际写入的昼夜交替配置（未开启时不返回） */
   dayNight?: DayNightResult;
+  /** 本次的对局布局（未指定 `symmetry` / `oreLayout` 且都取默认时不返回） */
+  layout?: LayoutResult;
 }

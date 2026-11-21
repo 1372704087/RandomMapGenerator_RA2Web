@@ -76,6 +76,19 @@ type GenerateRequest = {
     startHour?: number;
     retint?: boolean;
   };
+  /** 对局布局：对称方式；省略 = none */
+  symmetry?: 'none' | 'mirror';
+  /** 对局布局：矿脉分布；省略 = default（只保留出生点附近常规矿） */
+  oreLayout?: 'default' | 'center' | 'corners';
+};
+
+type LayoutEcho = {
+  symmetry: 'none' | 'mirror';
+  oreLayout: 'default' | 'center' | 'corners';
+  mirroredPairs: string[];
+  mirroredStarts: number;
+  oreCells: number;
+  oreCellsTotal: number;
 };
 
 type Status =
@@ -281,6 +294,11 @@ export default function GeneratePage() {
     actions: number[];
     cells?: string[];
   } | null>(null);
+  /** 对局布局：对称方式 + 矿脉分布 */
+  const [symmetryMode, setSymmetryMode] = useState<'none' | 'mirror'>('none');
+  const [oreLayoutMode, setOreLayoutMode] = useState<'default' | 'center' | 'corners'>('default');
+  /** 最近一次生成的对局布局（服务端 X-Map-Layout 回显） */
+  const [lastLayout, setLastLayout] = useState<LayoutEcho | null>(null);
   /** 预设表（服务端 /api/lighting/presets），用于色卡预览 */
   const [presetTable, setPresetTable] = useState<LightingPresetResponse | null>(null);
 
@@ -664,6 +682,8 @@ export default function GeneratePage() {
             }
           }
         : {}),
+      ...(symmetryMode === 'mirror' ? { symmetry: 'mirror' as const } : {}),
+      ...(oreLayoutMode !== 'default' ? { oreLayout: oreLayoutMode } : {}),
       ...(isRandom
         ? {}
         : { playerLocations: totalPlayers > 0 ? distributePlayers(totalPlayers) : players }),
@@ -764,6 +784,14 @@ export default function GeneratePage() {
         } catch { /* 头解析失败就不显示 */ }
       } else {
         setLastDayNight(null);
+      }
+      const layoutHeader = res.headers.get('X-Map-Layout');
+      if (layoutHeader) {
+        try {
+          setLastLayout(JSON.parse(layoutHeader) as LayoutEcho);
+        } catch { /* 头解析失败就不显示 */ }
+      } else {
+        setLastLayout(null);
       }
       // 后端把地图原文留在内存里并回了 X-Map-Key：预览凭 key 取，不必重传整张图
       const mapKey = res.headers.get('X-Map-Key');
@@ -1285,6 +1313,60 @@ export default function GeneratePage() {
             上一张实际写入：一轮 {lastDayNight.cycleSeconds}s · {lastDayNight.stages.length} 档
             （{lastDayNight.stages.map(s => `${s.hour}时/${s.seconds}s/${s.ambientPercent}%`).join(' → ')}）
             · 事件 {lastDayNight.eventId} · 动作 [{lastDayNight.actions.join(',')}]
+          </span>
+        )}
+      </section>
+
+      {/* ========== 对局布局 ========== */}
+      <section className="section">
+        <h2 className="section-title">对局布局</h2>
+
+        <div className="grid">
+          <div className="field">
+            <label htmlFor="symmetryMode">对称方式</label>
+            <select
+              id="symmetryMode"
+              value={symmetryMode}
+              onChange={e => setSymmetryMode(e.target.value as 'none' | 'mirror')}
+            >
+              <option value="none">非镜像（各方向各自随机）</option>
+              <option value="mirror">镜像（对向出生点 180° 点对称）</option>
+            </select>
+            <span className="field-hint">
+              镜像会把 N↔S / W↔E / NW↔SE / NE↔SW 里人数相同的一对做成点对称：
+              先放一侧，再把落点镜像给另一侧。地形模板没有镜像变体，所以**地形仍是随机**的，
+              只保证开局位置（和出生点附近的矿）对等
+            </span>
+          </div>
+
+          <div className="field">
+            <label htmlFor="oreLayoutMode">矿脉分布</label>
+            <select
+              id="oreLayoutMode"
+              value={oreLayoutMode}
+              onChange={e =>
+                setOreLayoutMode(e.target.value as 'default' | 'center' | 'corners')
+              }
+            >
+              <option value="default">默认（只在出生点附近撒矿）</option>
+              <option value="center">中央富矿（地图正中一大片）</option>
+              <option value="corners">四角贫矿（四个角各一小片）</option>
+            </select>
+            <span className="field-hint">
+              矿石 = 名字含 <code>tiberium</code> 的模板块，每块约 15×15 格。中央约铺 abs 网格的 28%，
+              四角合计约 10%（四等分）。矿脉在铺地形之前占位，所以不会被地形挤掉
+            </span>
+          </div>
+        </div>
+
+        {lastLayout && (
+          <span className="field-hint">
+            上一张实际生效：
+            {lastLayout.symmetry === 'mirror'
+              ? `镜像 ${lastLayout.mirroredPairs.join(' / ')} · ${lastLayout.mirroredStarts} 个出生点`
+              : '非镜像'}
+            · 矿脉 {lastLayout.oreLayout === 'default' ? '默认' : lastLayout.oreLayout === 'center' ? '中央富矿' : '四角贫矿'}
+            （新增 {lastLayout.oreCells} 块 / 全图 {lastLayout.oreCellsTotal} 块）
           </span>
         )}
       </section>

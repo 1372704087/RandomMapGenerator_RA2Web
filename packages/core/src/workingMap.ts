@@ -211,6 +211,29 @@ export class WorkingMap {
   /** 对应 C# int BottomSpace */
   public static BottomSpace: number = 0;
 
+  /**
+   * 出生点锚点覆盖（对称布局用）。
+   *
+   * 键是方向（N/S/W/E/NW/NE/SW/SE），值是 [absX, absY] 锚点。
+   * PlacePlayerLocation 会优先用它取代内部算出来的锚点，从而把对侧出生点
+   * 强制落到"点对称"的位置上（两侧的偏移序列本身互为镜像）。
+   */
+  public static PlayerLocationOverrides: Record<string, number[]> = {};
+
+  /**
+   * 对称布局的"落点直给"：键是方向，值是**已经镜像好**的 abs 单元坐标列表。
+   *
+   * 比锚点覆盖更硬：出生点直接落在这些格子上，不再走各方向自己的偏移序列，
+   * 因此不会因为相邻格被占 / 不可见而就近漂移，对称性是逐格保证的。
+   */
+  public static PlayerSpawnCellOverrides: Record<
+    string,
+    Array<[number, number]>
+  > = {};
+
+  /** 采样数据：非 null 时 RandomSetMapUnit 每次成功落子都会 push 实际坐标。 */
+  public static SpawnCellCapture: Array<[number, number]> | null = null;
+
   // -----------------------------------------------------------------------
   // 1. SterilizeMapUnit – 读取所有地图单元文件
   // -----------------------------------------------------------------------
@@ -328,6 +351,9 @@ export class WorkingMap {
 
     WorkingMap.PlacedAbstractMapUnitRecord = [];
     WorkingMap.FailureAbsMapUnitRecordList = [];
+    WorkingMap.PlayerLocationOverrides = {};
+    WorkingMap.PlayerSpawnCellOverrides = {};
+    WorkingMap.SpawnCellCapture = null;
     WorkingMap.UnitList = [];
     WorkingMap.InfantryList = [];
     WorkingMap.StructureList = [];
@@ -1101,6 +1127,9 @@ export class WorkingMap {
       randomizer.Add(name, 1);
     }
     WorkingMap.SetMapUnit(x, y, randomizer.NextWithReplacement());
+    if (WorkingMap.SpawnCellCapture) {
+      WorkingMap.SpawnCellCapture.push([x, y]);
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -2836,6 +2865,34 @@ export class WorkingMap {
       }
     }
 
+    // 对称布局：对侧锚点由调用方按"点对称"预先算好，这里直接取代内部锚点。
+    // 各方向的出生点偏移序列本身互为镜像（N 的 +1,-1 对应 S 的 -1,+1），
+    // 因此只对齐锚点就能得到严格镜像的整组出生点。
+    const override = WorkingMap.PlayerLocationOverrides[direction];
+    if (override) {
+      playerLocation = [override[0], override[1]];
+    }
+
+    // 更硬的一档：调用方直接把"镜像后的格子"给过来，逐格落子，不走偏移序列，
+    // 避免相邻格被占 / 不可见时就近漂移破坏对称。
+    const cellOverride = WorkingMap.PlayerSpawnCellOverrides[direction];
+    if (cellOverride && cellOverride.length > 0) {
+      for (let i = 0; i < number && i < cellOverride.length; i++) {
+        const [cx, cy] = cellOverride[i];
+        if (!WorkingMap.IsValidAMMM(cx, cy)) {
+          continue;
+        }
+        const amm = WorkingMap.AbstractMapMemberMatrix[cx][cy];
+        if (amm.Placed || !amm.IsAllOnVisibleMap) {
+          continue;
+        }
+        // 每次传新拷贝：RandomSetMapUnit 会 splice 修改入参
+        WorkingMap.RandomSetMapUnit(cx, cy, startingUnits.slice());
+      }
+      WorkingMap.PlaceTiberiumMUNearPlayer();
+      return;
+    }
+
     if (direction === 'NW') {
       for (let i = 0; i < number; i++) {
         WorkingMap.RandomSetMapUnitNoOverlap(
@@ -3080,13 +3137,14 @@ export class WorkingMap {
   public static PlaceTiberiumMUNearPlayer(): void {
     const tiberium1: string[] = [];
     for (const absMU of WorkingMap.AbstractMapUnitList) {
-      if (absMU.MapUnitName.includes('tiberium1')) {
+      const name = absMU.MapUnitName.toLowerCase();
+      if (name.includes('tiberium') && !name.includes('_g_')) {
         tiberium1.push(absMU.MapUnitName);
       }
     }
     const tiberium2: string[] = [];
     for (const absMU of WorkingMap.AbstractMapUnitList) {
-      if (absMU.MapUnitName.includes('tiberium2')) {
+      if (absMU.MapUnitName.toLowerCase().includes('_g_')) {
         tiberium2.push(absMU.MapUnitName);
       }
     }
@@ -3218,6 +3276,191 @@ export class WorkingMap {
         }
       }
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // 矿脉布局 / 点对称出生点（RMG 玩法参数）
+  // -----------------------------------------------------------------------
+
+  /** 收集矿石模板名（与 PlaceTiberiumMUNearPlayer 的判定保持一致）。 */
+  private static CollectTiberiumUnitNames(): string[] {
+    const names: string[] = [];
+    for (const absMU of WorkingMap.AbstractMapUnitList) {
+      // 模板文件名是 `tiberium_o_AAAA_w0_01` 这种，早期按 `tiberium1/tiberium2`
+      // 匹配其实一个都命中不了（地图里从来没有矿，是历史 bug），这里放宽到 tiberium。
+      if (absMU.MapUnitName.toLowerCase().includes('tiberium')) {
+        names.push(absMU.MapUnitName);
+      }
+    }
+    return names;
+  }
+
+  /** abs 网格尺寸（= ceil((Width+Height)/MapUnitSize)）。 */
+  public static AbsGridSize(): [number, number] {
+    return [
+      WorkingMap.AbstractMapMemberMatrix.length,
+      WorkingMap.AbstractMapMemberMatrix.length > 0
+        ? WorkingMap.AbstractMapMemberMatrix[0].length
+        : 0,
+    ];
+  }
+
+  /** 点对称（180°）坐标：`(W-1-x, H-1-y)`。 */
+  public static MirrorAbsLocation(loc: number[]): number[] {
+    const [xLen, yLen] = WorkingMap.AbsGridSize();
+    return [Math.max(0, xLen - 1 - loc[0]), Math.max(0, yLen - 1 - loc[1])];
+  }
+
+  /**
+   * 在 (cx, cy) 周围半径 `radius`（abs 单元）里铺 `count` 块矿石。
+   *
+   * 每块矿石就是一个 `tiberium1`/`tiberium2` 模板（≈25×25 格），
+   * 只往"可见且没被占"的格子里放，撞到已放置的格子就跳过。
+   *
+   * @returns 实际铺下的格子坐标
+   */
+  public static PlaceTiberiumClusterAt(
+    cx: number,
+    cy: number,
+    count: number,
+    radius: number,
+  ): Array<[number, number]> {
+    const names = WorkingMap.CollectTiberiumUnitNames();
+    const [xLen, yLen] = WorkingMap.AbsGridSize();
+    const placed: Array<[number, number]> = [];
+    if (names.length === 0 || count <= 0) {
+      return placed;
+    }
+    const r = Math.max(0, Math.round(radius));
+    // 邻域是 (2r+1)^2 个格子，成功率按 60% 估，最多试 count * 6 次
+    const maxAttempts = Math.max(count * 6, 12);
+    for (let attempt = 0; attempt < maxAttempts && placed.length < count; attempt++) {
+      const x = Math.min(
+        xLen - 1,
+        Math.max(0, cx + WorkingMap.Randomizer.Next(-r, r + 1)),
+      );
+      const y = Math.min(
+        yLen - 1,
+        Math.max(0, cy + WorkingMap.Randomizer.Next(-r, r + 1)),
+      );
+      if (!WorkingMap.IsValidAMMM(x, y)) {
+        continue;
+      }
+      const amm = WorkingMap.AbstractMapMemberMatrix[x][y];
+      if (amm.Placed || !amm.IsAllOnVisibleMap) {
+        continue;
+      }
+      // RandomSetMapUnit 会就地修改候选数组，这里每次传一份新拷贝
+      WorkingMap.RandomSetMapUnit(x, y, names.slice());
+      placed.push([x, y]);
+    }
+    return placed;
+  }
+
+  /**
+   * 中央富矿 / 四角贫矿。
+   *
+   * - `center`：在地图正中铺一大片（占 abs 网格的 `fraction`）；
+   * - `corners`：四角各铺一小片（总量同样是 `fraction`，四等分）。
+   *
+   * `fraction` 默认 center 0.16 / corners 0.06（abs 单元的比例，一个 abs 单元
+   * 约 7×7 格）：center 明显比 corners 富，符合"中央富矿 / 四角贫矿"的语义。
+   *
+   * @returns 实际铺下的格子（调用方可据此回显）
+   */
+  public static PlaceOreLayout(
+    mode: 'center' | 'corners',
+    fraction?: number,
+  ): Array<[number, number]> {
+    const [xLen, yLen] = WorkingMap.AbsGridSize();
+    const total = xLen * yLen;
+    const ratio = fraction ?? (mode === 'center' ? 0.16 : 0.06);
+
+    if (mode === 'center') {
+      const count = Math.max(1, Math.round(total * ratio));
+      const cx = Math.floor(xLen / 2);
+      const cy = Math.floor(yLen / 2);
+      // 邻域面积要够：约 (2r+1)^2 ≈ 2.5*count，否则 count 大时会被可用格子卡住
+      const radius = WorkingMap.ClusterRadiusFor(count);
+      return WorkingMap.PlaceTiberiumClusterAt(cx, cy, count, radius);
+    }
+
+    // 四角：abs 网格的四个角在斜地图上大多是"地图外"的空白三角，
+    // 所以从角点沿对角线往里走，找到第一个"合法 + 全在可见区 + 未放置"的格子当锚点。
+    const perCorner = Math.max(1, Math.round((total * ratio) / 4));
+    const radius = WorkingMap.ClusterRadiusFor(perCorner);
+    const cornerDirs: Array<[number, number]> = [
+      [0, 0],
+      [xLen - 1, 0],
+      [0, yLen - 1],
+      [xLen - 1, yLen - 1],
+    ];
+    const placed: Array<[number, number]> = [];
+    for (const [cx, cy] of cornerDirs) {
+      const dirX = cx === 0 ? 1 : -1;
+      const dirY = cy === 0 ? 1 : -1;
+      const anchor = WorkingMap.FindCornerAnchor(cx, cy, dirX, dirY);
+      if (!anchor) {
+        continue;
+      }
+      placed.push(
+        ...WorkingMap.PlaceTiberiumClusterAt(anchor[0], anchor[1], perCorner, radius),
+      );
+    }
+    return placed;
+  }
+
+  /**
+   * 让邻域面积够放 count 块：约 (2r+1)^2 ≈ 2.5*count。
+   *
+   * 半径太小会被"可用格子"卡住（早期实现铺不满），太大就会糊掉"局部"的语义。
+   */
+  private static ClusterRadiusFor(count: number): number {
+    const side = Math.sqrt(count * 2.5);
+    return Math.max(1, Math.round((side - 1) / 2));
+  }
+
+  /** 从角点沿对角线往里找第一个可放矿的格子；找不到返回 null。 */
+  private static FindCornerAnchor(
+    cx: number,
+    cy: number,
+    dirX: number,
+    dirY: number,
+  ): [number, number] | null {
+    const [xLen, yLen] = WorkingMap.AbsGridSize();
+    const maxSteps = Math.min(xLen, yLen);
+    for (let s = 0; s < maxSteps; s++) {
+      const x = cx + dirX * s;
+      const y = cy + dirY * s;
+      if (!WorkingMap.IsValidAMMM(x, y)) {
+        continue;
+      }
+      const amm = WorkingMap.AbstractMapMemberMatrix[x][y];
+      if (!amm || amm.Placed || !amm.IsAllOnVisibleMap) {
+        continue;
+      }
+      return [x, y];
+    }
+    return null;
+  }
+
+  /**
+   * 统计当前网格里已放置的矿石块数（用于回显与验收）。
+   */
+  public static CountTiberiumCells(): number {
+    let count = 0;
+    for (const row of WorkingMap.AbstractMapMemberMatrix) {
+      for (const amm of row) {
+        if (
+          amm &&
+          typeof amm.MapUnitName === 'string' &&
+          amm.MapUnitName.toLowerCase().includes('tiberium')
+        ) {
+          count++;
+        }
+      }
+    }
+    return count;
   }
 
   // -----------------------------------------------------------------------

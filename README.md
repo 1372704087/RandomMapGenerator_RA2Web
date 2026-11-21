@@ -123,6 +123,10 @@ packages/
 - 随机离子风暴（`POST /api/generate` 的 `ionStorm`）：按原版 `rulesmd.ini` 的闪电数值周期性起风暴（间隔可设 30-3600 秒，可切换"严格周期/随机窗口"）；落点用 **1–64 处点位**逼近"任意格"——严格模式走环形链（每 `间隔` 秒劈一次、落点轮换，走完一圈 `间隔 × 点位` 秒），随机模式用 Event 51 在 0.5~1.5 倍窗口里随机触发；风暴期间切 `[Lighting] Ion*` 光照；不触碰任何超级武器设置。规则与实测见 [`re/specs/IONSTORM.md`](re/specs/IONSTORM.md)
 - 环境光照（`POST /api/generate` 的 `lighting`）：24 个整点时刻 × 五套环境主题（温带/雪地/沙漠/新城市/岛屿），可 `preset` 写死、`random` 受种子约束抖动、`custom` 改单条通道；夜晚按「入夜→夜间→深夜→黎明」压暗（比 YR 苏联第 7 关的夜景更黑），不传则保持原版行为（只有沙漠随机写 `[Lighting]`）。规则与实测见 [`re/specs/LIGHTING.md`](re/specs/LIGHTING.md)
 - 昼夜交替（`POST /api/generate` 的 `dayNight`）：把 24 小时压成一轮 60–7200 秒（默认 600 秒／4 档／06 点起），用一条环形触发器链（`Action 73` 改环境光 + `142/143/144` 改 RGB + `53/54` 启用/禁用下一档 + `Event 13` 计时）在**游戏内**循环切光；档数 2–24，24 档 = 逐整点（00…23）走一遍；开局那一刻的 `[Lighting]` 直接写成"当前钟点"的天色，所以进游戏第一眼就对。规则、完整 ini 与编码踩坑见 [`re/specs/DAYNIGHT.md`](re/specs/DAYNIGHT.md)
+- 对局布局（`POST /api/generate` 的 `symmetry` / `oreLayout`）：
+  - `symmetry: "mirror"` —— 出生点镜像。N↔S / W↔E / NW↔SE / NE↔SW 里人数相同的一对先放 a 侧，再把 a 侧真实落下的 abs 单元逐格点对称塞给 b 侧（不走 b 侧自己的偏移序列，所以不会因为相邻格被占而漂移）；1v1 / 2v2 / 4 方对向都验证过（两侧出生点相加恒为 `(2W-1, 2H-1)`）。**地形不镜像**：地形模板没有镜像变体，地形仍是随机的。
+  - `oreLayout: "center" | "corners"` —— 中央富矿（地图正中一片，abs 网格 16%）/ 四角贫矿（四个角各一小片，合计 6%）。矿脉在铺地形**之前**占位，所以不会被地形挤掉；不传时只保留出生点附近的常规矿（每侧 1 块）。
+  - 回显：`X-Map-Layout` = `{symmetry, oreLayout, mirroredPairs, mirroredStarts, oreCells, oreCellsTotal}`。规则与验收见 [`re/specs/LAYOUT.md`](re/specs/LAYOUT.md)，验收脚本 `node scripts/verify-layout.mjs`（21 pass）。
 - 随机种子（`seed` + `X-Map-Seed` 回显）：同种子 ⇒ 逐字节相同的地图，见 [`re/specs/SEED_REPRO.md`](re/specs/SEED_REPRO.md)
 
 ## MapUnit 资源规范
