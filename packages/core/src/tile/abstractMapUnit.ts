@@ -38,6 +38,15 @@ export class AbstractMapUnit {
   public Height: number = WorkingMap.MapUnitHeight;
   /** 对应 C# AbstractTileType[,] AbsTileType（图块类型网格） */
   public AbsTileType: (AbstractTileType | null)[][] = [];
+  /**
+   * 南翼行：Ry = StartingY + Height 的 tile（Rx = StartingX + i）。
+   * 捕获窗口 [TopCorner..TopCorner+Size-1] 之外的一行，作者常在此画台地边缘
+   * 修面块（NEWURBAN pave fix 等）；拼接时该行落入南邻槽位的首行，
+   * 由 WorkingMap.ReconcileUnitWings 按高度落差写回，否则立面缺失渲染黑带。
+   */
+  public SouthWing: (AbstractTileType | null)[] = [];
+  /** 东翼列：Rx = StartingX + Width 的 tile（Ry = StartingY + j），作用同南翼（SE 面立面） */
+  public EastWing: (AbstractTileType | null)[] = [];
   /** 对应 C# int NWConnectionType = -1（西北连接类型） */
   public NWConnectionType: number = -1;
   /** 对应 C# int NEConnectionType = -1（东北连接类型） */
@@ -136,6 +145,36 @@ export class AbstractMapUnit {
             this.OverlayList.push(overlay);
           }
         }
+      }
+    }
+
+    // 翼区捕获：核心窗口外紧邻的南行/东列。作者画在这里的台地边缘修面块
+    // （NEWURBAN pave fix 等）若不捕获，拼接后高台地与低台地交界的立面
+    // 缺失，渲染为黑色竖带——见 WorkingMap.ReconcileUnitWings。
+    this.SouthWing = new Array<AbstractTileType | null>(this.Width).fill(null);
+    this.EastWing = new Array<AbstractTileType | null>(this.Height).fill(null);
+    for (const tile of map.IsoTileList) {
+      if (tile.TileNum === 0xffff) continue;
+      if (
+        tile.Ry === WorkingMap.StartingY + this.Height &&
+        tile.Rx >= WorkingMap.StartingX &&
+        tile.Rx < WorkingMap.StartingX + this.Width
+      ) {
+        const wing = new AbstractTileType();
+        wing.TileNum = tile.TileNum;
+        wing.SubTile = tile.SubTile;
+        wing.Z = tile.Z;
+        this.SouthWing[tile.Rx - WorkingMap.StartingX] = wing;
+      } else if (
+        tile.Rx === WorkingMap.StartingX + this.Width &&
+        tile.Ry >= WorkingMap.StartingY &&
+        tile.Ry < WorkingMap.StartingY + this.Height
+      ) {
+        const wing = new AbstractTileType();
+        wing.TileNum = tile.TileNum;
+        wing.SubTile = tile.SubTile;
+        wing.Z = tile.Z;
+        this.EastWing[tile.Ry - WorkingMap.StartingY] = wing;
       }
     }
 

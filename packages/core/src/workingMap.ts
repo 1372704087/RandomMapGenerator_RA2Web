@@ -61,6 +61,8 @@ export interface WorkingMapConfig {
   rulesContent: string;
   /** artmd.ini 文件内容 */
   artContent: string;
+  /** theater md.ini（temperatmd/snowmd/urbannmd 等）内容（可选）：供翼区调和识别立面/修面 tile 集 */
+  theaterIniContent?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +198,15 @@ export class WorkingMap {
   public static MapUnitWidth: number = 0;
   /** 对应 C# int MapUnitHeight */
   public static MapUnitHeight: number = 0;
+  /**
+   * 翼区调和的立面 tile 白名单：theater md.ini 里 SetName 匹配
+   * cliff/shore/fix 的 TileNum 区间（SterilizeMapUnit 阶段重建）。
+   */
+  public static FaceTileRanges: [number, number][] = [];
+  /** 判断 tile 是否属于立面/修面集合（翼区调和的覆盖门槛之一） */
+  public static IsFaceTile(tileNum: number): boolean {
+    return WorkingMap.FaceTileRanges.some(([lo, hi]) => tileNum >= lo && tileNum <= hi);
+  }
   /** 对应 C# int StartingX */
   public static StartingX: number = 0;
   /** 对应 C# int StartingY */
@@ -327,6 +338,43 @@ export class WorkingMap {
       settings.GetStringValue('settings', 'TopCorner', '18,18').split(',')[1],
       10,
     );
+
+    // 翼区调和用的立面 tile 白名单：从 theater md.ini 的 SetName 里挑
+    // cliff/shore/fix 家族（台地边缘的立面/修面块）。隧道、水面、道路、
+    // LAT 等延续内容不在内——翼区里它们不该被写回边界行。
+    WorkingMap.FaceTileRanges = [];
+    if (config.theaterIniContent) {
+      let base = 0;
+      let cur: { name: string; tiles: number } | null = null;
+      const flush = () => {
+        if (cur && cur.tiles > 0 && /cliff|shore|fix/i.test(cur.name)) {
+          WorkingMap.FaceTileRanges.push([base, base + cur.tiles - 1]);
+        }
+        base += cur ? cur.tiles : 0;
+        cur = null;
+      };
+      for (const line of config.theaterIniContent.split(/\r?\n/)) {
+        const t = line.trim();
+        if (/^\[TileSet\d{4}\]$/.test(t)) {
+          flush();
+          cur = { name: '', tiles: 0 };
+          continue;
+        }
+        if (!cur) continue;
+        if (t.startsWith('[')) {
+          flush();
+          cur = null;
+          continue;
+        }
+        const eq = t.indexOf('=');
+        if (eq <= 0) continue;
+        const key = t.slice(0, eq).trim().toLowerCase();
+        const val = t.slice(eq + 1).trim();
+        if (key === 'setname') cur.name = val;
+        else if (key === 'tilesinset') cur.tiles = Number(val) || 0;
+      }
+      flush();
+    }
 
     WorkingMap.Width = width;
     WorkingMap.Height = height;
@@ -1013,7 +1061,77 @@ export class WorkingMap {
         }
       }
     }
+    WorkingMap.ReconcileUnitWings();
     WorkingMap.CreateNonTileObjectLists();
+  }
+
+  // -----------------------------------------------------------------------
+  // ReconcileUnitWings
+  // -----------------------------------------------------------------------
+
+  /**
+   * 翼区调和：把单元捕获窗口外一圈的南翼行/东翼列按高度落差写回邻接槽位。
+   *
+   * 背景：AbstractMapUnit 只捕获 [TopCorner..TopCorner+MapUnitSize-1] 窗口，
+   * 单元文件里窗口外紧邻一圈（翼区）被丢弃——而作者画在翼区里的恰恰是
+   * 台地边缘的修面块（NEWURBAN pave fix 942-945 等）。核心末行/末列是高
+   * 台地的平地格，相邻槽位首行/首列是低台地平地格，中间数级落差没有立面
+   * 美术，渲染为黑色竖带（200x200 NEWURBAN 实测 296 格；原版 C# 同窗口
+   * 逻辑，固有行为）。
+   *
+   * 规则：翼区 tile 存在且「本单元相邻核心格 Z − 邻接槽位当前格 Z ≥ 1」
+   * 时覆盖——作者只在需要修面的地方画翼区内容，无落差边界维持邻接槽位
+   * 自身内容，不引入回归。北翼/西翼面向画面背面（不可见），不处理。
+   */
+  public static ReconcileUnitWings(): void {
+    const W = WorkingMap.MapUnitWidth;
+    const H = WorkingMap.MapUnitHeight;
+    for (let x = 0; x < WorkingMap.AbstractMapMemberMatrix.length; x++) {
+      for (
+        let y = 0;
+        y < WorkingMap.AbstractMapMemberMatrix[x].length;
+        y++
+      ) {
+        const member = WorkingMap.AbstractMapMemberMatrix[x][y];
+        if (!member.IsOnMap || !member.Placed) continue;
+        const unit = WorkingMap.GetAbstractMapUnitByName(member.MapUnitName);
+        if (!unit) continue;
+        // 南翼：翼区行落进南邻槽位首行；本单元核心末行同列格为其上方
+        for (let i = 0; i < W; i++) {
+          const wing = unit.SouthWing[i];
+          if (!wing || wing.TileNum === 0xffff) continue;
+          if (!WorkingMap.IsFaceTile(wing.TileNum)) continue;
+          const mx = x * W + i;
+          const my = y * H + H;
+          if (!WorkingMap.IsValidAT(mx, my)) continue;
+          const above = WorkingMap.AbsTile[mx]?.[my - 1];
+          const cur = WorkingMap.AbsTile[mx]?.[my];
+          if (!above || !cur) continue;
+          if (above.Z - cur.Z >= 1) {
+            const tile = new AbstractTile();
+            tile.SetProperty(mx, my, 0, wing);
+            WorkingMap.AbsTile[mx][my] = tile;
+          }
+        }
+        // 东翼：翼区列落进东邻槽位首列；本单元核心末列（同行）格为其西侧
+        for (let j = 0; j < H; j++) {
+          const wing = unit.EastWing[j];
+          if (!wing || wing.TileNum === 0xffff) continue;
+          if (!WorkingMap.IsFaceTile(wing.TileNum)) continue;
+          const mx = x * W + W;
+          const my = y * H + j;
+          if (!WorkingMap.IsValidAT(mx, my)) continue;
+          const left = WorkingMap.AbsTile[mx - 1]?.[my];
+          const cur = WorkingMap.AbsTile[mx]?.[my];
+          if (!left || !cur) continue;
+          if (left.Z - cur.Z >= 1) {
+            const tile = new AbstractTile();
+            tile.SetProperty(mx, my, 0, wing);
+            WorkingMap.AbsTile[mx][my] = tile;
+          }
+        }
+      }
+    }
   }
 
   // -----------------------------------------------------------------------

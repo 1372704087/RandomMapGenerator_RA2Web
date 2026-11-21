@@ -329,6 +329,24 @@ function loadTheaterResources(
     additionIniContent = readTextFile(additionPath);
   }
 
+  // 读取 theater md.ini（可选）：翼区调和需要按 SetName 识别立面/修面 tile 集。
+  // 引擎 theater 枚举 → 素材 ini 文件名（temperatmd / urbannmd 等官方缩写）。
+  const theaterIniNames: Record<string, string> = {
+    DESERT: 'desertmd.ini',
+    SNOW: 'snowmd.ini',
+    TEMPERATE: 'temperatmd.ini',
+    NEWURBAN: 'urbannmd.ini',
+    URBAN: 'urbanmd.ini',
+    LUNAR: 'lunarmd.ini',
+  };
+  const theaterIniFile =
+    theaterIniNames[theaterEnum.toUpperCase()] ?? `${theaterEnum.toLowerCase()}md.ini`;
+  const theaterIniPath = path.join(RESOURCES_DIR, 'theater', theaterIniFile);
+  let theaterIniContent: string | undefined;
+  if (fs.existsSync(theaterIniPath)) {
+    theaterIniContent = readTextFile(theaterIniPath);
+  }
+
   // 构建 WorkingMapConfig
   const config: WorkingMapConfig = {
     mapUnitFiles,
@@ -337,6 +355,7 @@ function loadTheaterResources(
     settingsContent,
     rulesContent: globalRes.rulesContent,
     artContent: globalRes.artContent,
+    theaterIniContent,
   };
 
   // 预执行 Initialize + SterilizeMapUnit，缓存结果
