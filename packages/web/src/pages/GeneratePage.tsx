@@ -442,6 +442,17 @@ export default function GeneratePage() {
     setHeight(Math.max(0, Math.min(heightMax, n)));
   }
 
+  /**
+   * 宽/高是 `type="number"`，用户逐位敲的时候会出现 1、15 这种中间值。
+   * 输入过程中只压上限（超了立刻回弹），下限留到 blur 再收口，
+   * 否则敲 "150" 时第一个 "1" 就被抬成 90，后面的键会粘成 "905"。
+   * 原版允许 0（=随机），VERA20k 不允许 0。
+   */
+  function clampSide(value: number, min: number, max: number, allowZero: boolean) {
+    if (allowZero && value === 0) return 0;
+    return Math.max(min, Math.min(max, value));
+  }
+
   function handleVera20kToggle(checked: boolean) {
     setVera20k(checked);
     if (checked) {
@@ -881,11 +892,12 @@ export default function GeneratePage() {
               max={widthMax}
               value={width}
               onChange={handleWidthChange}
+              onBlur={() => setWidth(clampSide(width, WIDTH_MIN, widthMax, !vera20k))}
             />
             <span className="field-hint">
               {vera20k
-                ? `${WIDTH_MIN}-${veraMaxSide}，且宽+高 ≤ ${veraMaxSpan}`
-                : `0=随机，范围 ${WIDTH_MIN}-${WIDTH_MAX}`}
+                ? `${WIDTH_MIN}-${veraMaxSide}，且宽+高 ≤ ${veraMaxSpan}（小于 ${WIDTH_MIN} 会回弹）`
+                : `0=随机，范围 ${WIDTH_MIN}-${WIDTH_MAX}（小于 ${WIDTH_MIN} 会回弹）`}
             </span>
           </div>
 
@@ -898,11 +910,12 @@ export default function GeneratePage() {
               max={heightMax}
               value={height}
               onChange={handleHeightChange}
+              onBlur={() => setHeight(clampSide(height, HEIGHT_MIN, heightMax, !vera20k))}
             />
             <span className="field-hint">
               {vera20k
-                ? `${HEIGHT_MIN}-${veraMaxSide}，且宽+高 ≤ ${veraMaxSpan}`
-                : `0=随机，范围 ${HEIGHT_MIN}-${HEIGHT_MAX}`}
+                ? `${HEIGHT_MIN}-${veraMaxSide}，且宽+高 ≤ ${veraMaxSpan}（小于 ${HEIGHT_MIN} 会回弹）`
+                : `0=随机，范围 ${HEIGHT_MIN}-${HEIGHT_MAX}（小于 ${HEIGHT_MIN} 会回弹）`}
             </span>
           </div>
 
