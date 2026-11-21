@@ -128,6 +128,7 @@ packages/
   - `oreLayout: "center" | "corners"` —— 中央富矿（地图正中一片，abs 网格 16%）/ 四角贫矿（四个角各一小片，合计 6%）。矿脉在铺地形**之前**占位，所以不会被地形挤掉；不传时只保留出生点附近的常规矿（每侧 1 块）。
   - 回显：`X-Map-Layout` = `{symmetry, oreLayout, mirroredPairs, mirroredStarts, oreCells, oreCellsTotal}`。规则与验收见 [`re/specs/LAYOUT.md`](re/specs/LAYOUT.md)，验收脚本 `node scripts/verify-layout.mjs`（21 pass）。
 - 随机种子（`seed` + `X-Map-Seed` 回显）：同种子 ⇒ 逐字节相同的地图，见 [`re/specs/SEED_REPRO.md`](re/specs/SEED_REPRO.md)
+- 上限单一数据源（`packages/server/src/limits.ts` + `GET /api/limits`）：原版 8 人 / VERA20k 30 人 / 单边 512 / 宽+高 1024 / 正向每方向 4。前端不再抄一份数字，开机向接口拉（拉不到用同一组兜底）。**30 是引擎硬上限**（`vera20k/src/skirmish_launch.rs:24` `NETWORK_PLAYER_SLOT_COUNT`），抬到 32 不会多 2 人，而是整图被 `skirmish_player_capacity()` 打回 8 人。30 人 500×500 实测 1.9 s、`[Waypoints]` 30 条全有坐标，见 [`re/specs/VERA20K_LIMITS.md`](re/specs/VERA20K_LIMITS.md)，验收 `node scripts/verify-limits.mjs`（23 pass）。
 
 ## MapUnit 资源规范
 

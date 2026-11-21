@@ -42,6 +42,15 @@ import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
 import { putMap, getMap } from './mapHandoff';
 import { GenerateOptions, LightingRequest, IonStormRequest, DayNightRequest } from './types';
+import {
+  MAX_PLAYERS_RETAIL,
+  MAX_PLAYERS_VERA20K,
+  MAX_PLAYERS_CARDINAL,
+  VERA20K_MAX_SIDE,
+  VERA20K_MAX_SPAN,
+  LIMITS,
+  LIMITS_PROVENANCE,
+} from './limits';
 
 // ---------------------------------------------------------------------------
 // 服务器配置
@@ -92,6 +101,15 @@ app.get('/api/theaters', (_req: Request, res: Response) => {
     count: theaters.length,
     theaters,
   });
+});
+
+/**
+ * GET /api/limits
+ * 尺寸 / 人数的硬上限（单一数据源在 `limits.ts`，附引擎出处）。
+ * 前端不再自己存一份常量，避免两边漂。
+ */
+app.get('/api/limits', (_req: Request, res: Response) => {
+  res.json({ limits: LIMITS, provenance: LIMITS_PROVENANCE });
 });
 
 /**
@@ -665,8 +683,11 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
     if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
       return 'VERA20k mode requires positive integer width and height';
     }
-    if (width > 512 || height > 512 || width + height > 1024) {
-      return `VERA20k size limit is each side <= 512 and width+height <= 1024; got ${width}x${height}`;
+    if (width > VERA20K_MAX_SIDE || height > VERA20K_MAX_SIDE || width + height > VERA20K_MAX_SPAN) {
+      return (
+        `VERA20k size limit is each side <= ${VERA20K_MAX_SIDE} and ` +
+        `width+height <= ${VERA20K_MAX_SPAN}; got ${width}x${height}`
+      );
     }
   }
 
@@ -745,16 +766,23 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
         vera20k &&
         ['N', 'S', 'W', 'E'].includes(dir) &&
         typeof count === 'number' &&
-        count > 4
+        count > MAX_PLAYERS_CARDINAL
       ) {
-        return `VERA20k: playerLocations.${dir} must be at most 4 (cardinal placement pattern)`;
+        return (
+          `VERA20k: playerLocations.${dir} must be at most ${MAX_PLAYERS_CARDINAL} ` +
+          `(cardinal placement pattern)`
+        );
       }
       totalPlayers += count ?? 0;
     }
 
-    const maxPlayers = vera20k ? 30 : 8;
+    const maxPlayers = vera20k ? MAX_PLAYERS_VERA20K : MAX_PLAYERS_RETAIL;
     if (totalPlayers > maxPlayers) {
-      return `Total player count (${totalPlayers}) must not exceed ${maxPlayers}`;
+      const why = vera20k
+        ? `（VERA20k 的 NETWORK_PLAYER_SLOT_COUNT = ${MAX_PLAYERS_VERA20K}，` +
+          `超过时引擎会把 [Basic] MaxPlayers 判无效并回落到 ${MAX_PLAYERS_RETAIL} 人）`
+        : '';
+      return `Total player count (${totalPlayers}) must not exceed ${maxPlayers}${why}`;
     }
   }
 

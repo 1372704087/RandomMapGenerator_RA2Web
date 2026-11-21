@@ -13,6 +13,7 @@
     "index:mapunits": "node scripts/mapunit-index.mjs",
     "check:mapunits": "node scripts/mapunit-index.mjs --check",
     "rename:mapunits": "node scripts/mapunit-rename.mjs",
-    "verify:theaters": "node scripts/verify-theaters.mjs"
+    "verify:theaters": "node scripts/verify-theaters.mjs",
+    "verify:limits": "node scripts/verify-limits.mjs"
   }
 }

@@ -42,6 +42,13 @@ import {
   LightingResult,
   LayoutResult,
 } from './types';
+import {
+  MAX_PLAYERS_RETAIL,
+  MAX_PLAYERS_VERA20K,
+  MAX_PLAYERS_CARDINAL,
+  VERA20K_MAX_SIDE,
+  VERA20K_MAX_SPAN,
+} from './limits';
 
 /**
  * 第 14 步：环境光照。
@@ -96,18 +103,9 @@ function applyLighting(
 }
 
 // ---------------------------------------------------------------------------
-// 玩家 / 尺寸上限
+// 玩家 / 尺寸上限（数字与出处集中在 limits.ts，别在这里另存一份）
 // ---------------------------------------------------------------------------
 
-/** 原版最多 8 个出生点（waypoints 0..7）。 */
-const MAX_PLAYERS_RETAIL = 8;
-/** VERA20k 的 [Basic] MaxPlayers 扩展范围上限。 */
-const MAX_PLAYERS_VERA20K = 30;
-/** VERA20k 的 [Map] Size 硬限：Width+Height ≤ 1024，单边最大 512（最大正方形）。 */
-const VERA20K_MAX_SIDE = 512;
-const VERA20K_MAX_SPAN = 1024;
-/** N/S/W/E 的 PlacePlayerLocation 只实现了 4 个偏移，超过会静默丢弃。 */
-const MAX_PLAYERS_CARDINAL = 4;
 const CARDINAL_DIRECTIONS: readonly Direction[] = ['N', 'S', 'W', 'E'];
 
 /** 输入组合不合法（不是服务器内部故障）；HTTP 层应回 400。 */
@@ -212,7 +210,11 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
   const maxPlayers = vera20k ? MAX_PLAYERS_VERA20K : MAX_PLAYERS_RETAIL;
   if (totalPlayers > maxPlayers) {
     throw new GenerateInputError(
-      `Total player count (${totalPlayers}) exceeds maximum (${maxPlayers}).`,
+      `Total player count (${totalPlayers}) exceeds maximum (${maxPlayers})` +
+        (vera20k
+          ? `; VERA20k caps at NETWORK_PLAYER_SLOT_COUNT=${MAX_PLAYERS_VERA20K} and falls back to ` +
+            `${MAX_PLAYERS_RETAIL} when [Basic] MaxPlayers is out of range.`
+          : '.'),
     );
   }
   if (vera20k) {

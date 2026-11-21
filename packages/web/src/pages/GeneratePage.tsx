@@ -136,10 +136,14 @@ const WIDTH_MIN = 90;
 const WIDTH_MAX = 200;
 const HEIGHT_MIN = 90;
 const HEIGHT_MAX = 200;
-/** VERA20k: [Map] Size 硬限 width+height ≤ 1024，最大正方形 512×512。 */
-const VERA_MAX_SIDE = 512;
-const VERA_MAX_SPAN = 1024;
-const VERA_MAX_TOTAL_PLAYERS = 30;
+/** VERA20k 上限兜底值；真实值从 `/api/limits` 取（服务端 `limits.ts` 是单一数据源）。 */
+const FALLBACK_LIMITS = {
+  vera20kMaxSide: 512,
+  vera20kMaxSpan: 1024,
+  maxPlayersVera20k: 30,
+  maxPlayersCardinal: 4
+};
+type Limits = typeof FALLBACK_LIMITS;
 const SMUDGE_MIN = 0;
 const SMUDGE_MAX = 0.1;
 const SMUDGE_STEP = 0.01;
@@ -149,7 +153,6 @@ const MAX_PLAYERS_PER_DIR = 8;
 const MAX_TOTAL_PLAYERS = 8;
 /** N/S/W/E 的 PlacePlayerLocation 写死了 4 个偏移，VERA 模式下按 4 校验。 */
 const CARDINAL_DIRECTIONS: Direction[] = ['N', 'S', 'W', 'E'];
-const MAX_CARDINAL_PLAYERS = 4;
 
 const EMPTY_PLAYERS: Players = {
   N: 0, S: 0, W: 0, E: 0, NE: 0, SE: 0, NW: 0, SW: 0
@@ -243,6 +246,12 @@ export default function GeneratePage() {
   const [totalRandom, setTotalRandom] = useState(false);
   const [players, setPlayers] = useState<Players>(EMPTY_PLAYERS);
   const [vera20k, setVera20k] = useState(false);
+  /** 上限快照（服务端 /api/limits；拿不到就用 FALLBACK_LIMITS） */
+  const [limits, setLimits] = useState<Limits>(FALLBACK_LIMITS);
+  const veraMaxSide = limits.vera20kMaxSide;
+  const veraMaxSpan = limits.vera20kMaxSpan;
+  const veraMaxPlayers = limits.maxPlayersVera20k;
+  const maxCardinalPlayers = limits.maxPlayersCardinal;
   const [damageEnabled, setDamageEnabled] = useState(false);
   const [damageMin, setDamageMin] = useState(10);
   const [damageMax, setDamageMax] = useState(50);
@@ -348,6 +357,24 @@ export default function GeneratePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 加载尺寸/人数上限（服务端 limits.ts 是单一数据源，前端不再自己存一份）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/limits');
+        if (!res.ok) throw new Error(`获取上限失败: ${res.status}`);
+        const data = (await res.json()) as { limits?: Partial<Limits> };
+        if (!cancelled && data.limits) {
+          setLimits({ ...FALLBACK_LIMITS, ...data.limits });
+        }
+      } catch {
+        // 拿不到就继续用兜底值
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // 加载光照预设表（一次即可，用于色卡预览与下拉选项）
   useEffect(() => {
     let cancelled = false;
@@ -369,15 +396,15 @@ export default function GeneratePage() {
     [players]
   );
 
-  const widthMax = vera20k ? VERA_MAX_SIDE : WIDTH_MAX;
-  const heightMax = vera20k ? VERA_MAX_SIDE : HEIGHT_MAX;
-  const playersMax = vera20k ? VERA_MAX_TOTAL_PLAYERS : PLAYERS_MAX;
-  const maxTotalPlayers = vera20k ? VERA_MAX_TOTAL_PLAYERS : MAX_TOTAL_PLAYERS;
+  const widthMax = vera20k ? veraMaxSide : WIDTH_MAX;
+  const heightMax = vera20k ? veraMaxSide : HEIGHT_MAX;
+  const playersMax = vera20k ? veraMaxPlayers : PLAYERS_MAX;
+  const maxTotalPlayers = vera20k ? veraMaxPlayers : MAX_TOTAL_PLAYERS;
   const perDirMax = (dir: Direction) =>
     vera20k && CARDINAL_DIRECTIONS.includes(dir)
-      ? MAX_CARDINAL_PLAYERS
+      ? maxCardinalPlayers
       : vera20k
-        ? VERA_MAX_TOTAL_PLAYERS
+        ? veraMaxPlayers
         : MAX_PLAYERS_PER_DIR;
 
   const playersValid = totalRandom || (totalPlayers > 0
@@ -421,8 +448,8 @@ export default function GeneratePage() {
       setTotalRandom(false);
       setWidth(500);
       setHeight(500);
-      setTotalPlayers(VERA_MAX_TOTAL_PLAYERS);
-      setPlayers(distributePlayers(VERA_MAX_TOTAL_PLAYERS));
+      setTotalPlayers(veraMaxPlayers);
+      setPlayers(distributePlayers(veraMaxPlayers));
     } else {
       if (width > WIDTH_MAX) setWidth(WIDTH_MAX);
       if (height > HEIGHT_MAX) setHeight(HEIGHT_MAX);
@@ -506,14 +533,14 @@ export default function GeneratePage() {
     if (vera20k) {
       if (totalRandom) return 'VERA20k 模式不支持完全随机';
       if (width === 0 || height === 0) return 'VERA20k 模式需要指定宽高（默认 500×500）';
-      if (width < WIDTH_MIN || width > VERA_MAX_SIDE) {
-        return `VERA20k 宽度需为 ${WIDTH_MIN}-${VERA_MAX_SIDE}`;
+      if (width < WIDTH_MIN || width > veraMaxSide) {
+        return `VERA20k 宽度需为 ${WIDTH_MIN}-${veraMaxSide}`;
       }
-      if (height < HEIGHT_MIN || height > VERA_MAX_SIDE) {
-        return `VERA20k 高度需为 ${HEIGHT_MIN}-${VERA_MAX_SIDE}`;
+      if (height < HEIGHT_MIN || height > veraMaxSide) {
+        return `VERA20k 高度需为 ${HEIGHT_MIN}-${veraMaxSide}`;
       }
-      if (width + height > VERA_MAX_SPAN) {
-        return `VERA20k 限制宽+高 ≤ ${VERA_MAX_SPAN}（当前 ${width + height}）；1000×1000 会被 VERA20k 拒绝`;
+      if (width + height > veraMaxSpan) {
+        return `VERA20k 限制宽+高 ≤ ${veraMaxSpan}（当前 ${width + height}）；1000×1000 会被 VERA20k 拒绝`;
       }
     } else {
       // width/height 允许 0 (随机) 或 90-200
@@ -820,7 +847,7 @@ export default function GeneratePage() {
               <span>VERA20k 适配（30 人 / 大图）</span>
             </label>
             <span className="field-hint">
-              勾选后默认 500×500、30 人；单边 ≤ {VERA_MAX_SIDE}，且宽+高 ≤ {VERA_MAX_SPAN}
+              勾选后默认 500×500、30 人；单边 ≤ {veraMaxSide}，且宽+高 ≤ {veraMaxSpan}
               （1000×1000 会被 VERA20k 拒绝，最大正方形 512×512）。
             </span>
           </div>
@@ -857,7 +884,7 @@ export default function GeneratePage() {
             />
             <span className="field-hint">
               {vera20k
-                ? `${WIDTH_MIN}-${VERA_MAX_SIDE}，且宽+高 ≤ ${VERA_MAX_SPAN}`
+                ? `${WIDTH_MIN}-${veraMaxSide}，且宽+高 ≤ ${veraMaxSpan}`
                 : `0=随机，范围 ${WIDTH_MIN}-${WIDTH_MAX}`}
             </span>
           </div>
@@ -874,7 +901,7 @@ export default function GeneratePage() {
             />
             <span className="field-hint">
               {vera20k
-                ? `${HEIGHT_MIN}-${VERA_MAX_SIDE}，且宽+高 ≤ ${VERA_MAX_SPAN}`
+                ? `${HEIGHT_MIN}-${veraMaxSide}，且宽+高 ≤ ${veraMaxSpan}`
                 : `0=随机，范围 ${HEIGHT_MIN}-${HEIGHT_MAX}`}
             </span>
           </div>
@@ -1427,8 +1454,8 @@ export default function GeneratePage() {
           </div>
           {vera20k && (
             <span className="field-hint">
-              VERA20k：正向 N/S/W/E 每方向最多 {MAX_CARDINAL_PLAYERS} 个，总人数最多{' '}
-              {VERA_MAX_TOTAL_PLAYERS}。总人数 &gt;0 时按快捷均分，设为 0 才使用下方方向计数。
+              VERA20k：正向 N/S/W/E 每方向最多 {maxCardinalPlayers} 个，总人数最多{' '}
+              {veraMaxPlayers}。总人数 &gt;0 时按快捷均分，设为 0 才使用下方方向计数。
               尺寸过小时出生点可能放不下，届时会提示减少人数或增大地图。
             </span>
           )}
