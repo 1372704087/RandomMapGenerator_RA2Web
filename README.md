@@ -122,6 +122,7 @@ packages/
 - 完全随机模式 / 手动配置模式
 - 随机离子风暴（`POST /api/generate` 的 `ionStorm`）：按原版 `rulesmd.ini` 的闪电数值，在地图中心周期性起风暴（间隔可设 30-3600 秒，可切换"严格周期/随机窗口"），风暴期间切 `[Lighting] Ion*` 光照；不触碰任何超级武器设置。规则与实测见 [`re/specs/IONSTORM.md`](re/specs/IONSTORM.md)
 - 环境光照（`POST /api/generate` 的 `lighting`）：24 个整点时刻 × 五套环境主题（温带/雪地/沙漠/新城市/岛屿），可 `preset` 写死、`random` 受种子约束抖动、`custom` 改单条通道；夜晚按「入夜→夜间→深夜→黎明」压暗（比 YR 苏联第 7 关的夜景更黑），不传则保持原版行为（只有沙漠随机写 `[Lighting]`）。规则与实测见 [`re/specs/LIGHTING.md`](re/specs/LIGHTING.md)
+- 昼夜交替（`POST /api/generate` 的 `dayNight`）：把 24 小时压成一轮 60–7200 秒（默认 600 秒／4 档／06 点起），用一条环形触发器链（`Action 73` 改环境光 + `142/143/144` 改 RGB + `53/54` 启用/禁用下一档 + `Event 13` 计时）在**游戏内**循环切光；开局那一刻的 `[Lighting]` 直接写成"当前钟点"的天色，所以进游戏第一眼就对。规则、完整 ini 与编码踩坑见 [`re/specs/DAYNIGHT.md`](re/specs/DAYNIGHT.md)
 - 随机种子（`seed` + `X-Map-Seed` 回显）：同种子 ⇒ 逐字节相同的地图，见 [`re/specs/SEED_REPRO.md`](re/specs/SEED_REPRO.md)
 
 ## MapUnit 资源规范

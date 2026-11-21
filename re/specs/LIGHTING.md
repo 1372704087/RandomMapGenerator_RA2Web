@@ -152,6 +152,7 @@ preset 四档逐个比对、`environment` 显式覆盖、**hour 锚点校验（0
 ## 注意
 
 * `[Lighting]` 是整张图一个值，不分区域、不随时间流动 —— 原版引擎就这机制。
+  想在一局里变天，必须配 `dayNight`（触发器链），见 [`DAYNIGHT.md`](DAYNIGHT.md)。
 * 同 seed + 同代码 + 同素材才有相同结果；`jitter` 抖动也是随机流的一部分。
 * `auto` 下沙漠的抖动与 `random` 模式用的是两条不同取数路径（前者按 `settings.ini` 区间，
   后者按预设 ±比例），数值分布不完全一样，属预期。

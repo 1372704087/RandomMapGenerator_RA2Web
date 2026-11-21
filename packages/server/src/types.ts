@@ -94,6 +94,12 @@ export interface GenerateOptions {
    * 一个在地图中心循环起风暴的 trigger（不碰任何超级武器 TechLevel）。
    */
   ionStorm?: IonStormRequest;
+
+  /**
+   * 昼夜交替：在游戏里按周期循环切换环境光（触发链 Action 73/142/143/144 + 53/54）。
+   * 不传/`enabled:false` = 只写静态光照，不做循环。
+   */
+  dayNight?: DayNightRequest;
 }
 
 /** 地图尺寸范围 */
@@ -258,6 +264,48 @@ export interface IonStormResult {
   actionId: number;
 }
 
+/** 昼夜交替请求（对齐 core 的 `DayNightOptions`）。 */
+export interface DayNightRequest {
+  enabled?: boolean;
+  /** 一轮（白天 + 黑夜）的总时长，秒（60..7200，默认 600）。 */
+  cycleSeconds?: number;
+  /** 关键帧数 2..8（默认 4 = 06 点/12 点/18 点/00 点）。 */
+  stages?: number;
+  /** 开局钟点 0..23（默认 6）。 */
+  startHour?: number;
+  /** 是否同时改 RGB 三通道（动作 142/143/144），默认 true。 */
+  retint?: boolean;
+}
+
+/** 昼夜交替的单个阶段。 */
+export interface DayNightStageResult {
+  index: number;
+  hour: number;
+  label: string;
+  seconds: number;
+  values: {
+    Ambient: number;
+    Red: number;
+    Green: number;
+    Blue: number;
+    Level: number;
+  };
+  ambientPercent: number;
+  triggerId: string;
+  tagId: string;
+}
+
+/** 实际写入的昼夜交替配置，回给调用方便于核对。 */
+export interface DayNightResult {
+  enabled: true;
+  cycleSeconds: number;
+  environment: string;
+  stages: DayNightStageResult[];
+  actions: number[];
+  eventId: number;
+  cellTags: Array<{ cell: { x: number; y: number }; key: string; tagId: string }>;
+}
+
 /** 地图生成结果 */
 export interface GenerateResult {
   /** 生成的地图 INI 内容 */
@@ -270,4 +318,6 @@ export interface GenerateResult {
   lighting?: LightingResult;
   /** 本次实际写入的离子风暴配置（未开启时不返回） */
   ionStorm?: IonStormResult;
+  /** 本次实际写入的昼夜交替配置（未开启时不返回） */
+  dayNight?: DayNightResult;
 }

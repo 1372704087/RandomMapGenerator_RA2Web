@@ -9,6 +9,8 @@ export * from './format/index';
 export * from './fileio';
 export * from './workingMap';
 export * from './lighting';
+export * from './trigger';
+export * from './daynight';
 export * from './ionstorm';
 export * from './tile/enums';
 export * from './tile/isoTile';

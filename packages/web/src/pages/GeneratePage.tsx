@@ -68,6 +68,14 @@ type GenerateRequest = {
     randomize?: boolean;
     sites?: number;
   };
+  /** 昼夜交替；省略或 enabled:false = 只写静态光照 */
+  dayNight?: {
+    enabled: boolean;
+    cycleSeconds?: number;
+    stages?: number;
+    startHour?: number;
+    retint?: boolean;
+  };
 };
 
 type Status =
@@ -257,6 +265,21 @@ export default function GeneratePage() {
     siteCount?: number;
     sites?: Array<{ w: number; x: number; y: number }>;
     cell: { x: number; y: number };
+  } | null>(null);
+  /** 昼夜交替：开关、一轮秒数、关键帧数、开局钟点、是否重染 RGB */
+  const [dayNightEnabled, setDayNightEnabled] = useState(false);
+  const [dayNightCycle, setDayNightCycle] = useState(600);
+  const [dayNightStages, setDayNightStages] = useState(4);
+  const [dayNightStartHour, setDayNightStartHour] = useState(6);
+  const [dayNightRetint, setDayNightRetint] = useState(true);
+  /** 最近一次生成的昼夜配置（服务端 X-Map-DayNight 回显） */
+  const [lastDayNight, setLastDayNight] = useState<{
+    cycleSeconds: number;
+    environment: string;
+    stages: Array<{ hour: number; seconds: number; ambientPercent: number }>;
+    eventId: number;
+    actions: number[];
+    cells?: string[];
   } | null>(null);
   /** 预设表（服务端 /api/lighting/presets），用于色卡预览 */
   const [presetTable, setPresetTable] = useState<LightingPresetResponse | null>(null);
@@ -630,6 +653,17 @@ export default function GeneratePage() {
             }
           }
         : {}),
+      ...(dayNightEnabled
+        ? {
+            dayNight: {
+              enabled: true,
+              cycleSeconds: dayNightCycle,
+              stages: dayNightStages,
+              startHour: dayNightStartHour,
+              retint: dayNightRetint
+            }
+          }
+        : {}),
       ...(isRandom
         ? {}
         : { playerLocations: totalPlayers > 0 ? distributePlayers(totalPlayers) : players }),
@@ -713,6 +747,23 @@ export default function GeneratePage() {
         } catch { /* 头解析失败就不显示 */ }
       } else {
         setLastIonStorm(null);
+      }
+      const dayNightHeader = res.headers.get('X-Map-DayNight');
+      if (dayNightHeader) {
+        try {
+          setLastDayNight(
+            JSON.parse(dayNightHeader) as {
+              cycleSeconds: number;
+              environment: string;
+              stages: Array<{ hour: number; seconds: number; ambientPercent: number }>;
+              eventId: number;
+              actions: number[];
+              cells?: string[];
+            },
+          );
+        } catch { /* 头解析失败就不显示 */ }
+      } else {
+        setLastDayNight(null);
       }
       // 后端把地图原文留在内存里并回了 X-Map-Key：预览凭 key 取，不必重传整张图
       const mapKey = res.headers.get('X-Map-Key');
@@ -1119,6 +1170,109 @@ export default function GeneratePage() {
                   .join(' ')}`
               : ` · 中心 (${lastIonStorm.cell.x},${lastIonStorm.cell.y})`} ·
             {lastIonStorm.randomize ? '随机窗口' : '固定周期'}
+          </span>
+        )}
+      </section>
+
+      {/* ========== 昼夜交替 ========== */}
+      <section className="section">
+        <h2 className="section-title">昼夜交替</h2>
+
+        <div className="field field-inline">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={dayNightEnabled}
+              onChange={e => setDayNightEnabled(e.target.checked)}
+            />
+            <span>游戏内按周期循环切换环境光（白天 → 黄昏 → 夜 → 黎明）</span>
+          </label>
+        </div>
+        <span className="field-hint">
+          一局里每隔一段时间自动变一次天色，跑完一套再从头开始。
+          用触发器改光（Action 73 环境光 + 142/143/144 三通道），53/54 把链交给下一档；
+          开局那一刻的光照直接写进 [Lighting]，进游戏就是"当前钟点"的天色。
+        </span>
+
+        {dayNightEnabled && (
+          <div className="grid">
+            <div className="field">
+              <label htmlFor="dayNightCycle">一轮总时长（秒）</label>
+              <input
+                id="dayNightCycle"
+                type="number"
+                min={60}
+                max={7200}
+                step={30}
+                value={dayNightCycle}
+                onChange={e => setDayNightCycle(Number(e.target.value))}
+              />
+              <span className="field-hint">
+                60-7200 秒，默认 600（10 分钟走完一整天）；按档数自动均分，
+                当前 {dayNightStages} 档 = 每档约 {Math.round(dayNightCycle / dayNightStages)} 秒
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="dayNightStages">关键帧（档）</label>
+              <select
+                id="dayNightStages"
+                value={dayNightStages}
+                onChange={e => setDayNightStages(Number(e.target.value))}
+              >
+                {[2, 3, 4, 6, 8].map(n => (
+                  <option key={n} value={n}>
+                    {n} 档
+                    {n === 2
+                      ? '（白天 / 黑夜）'
+                      : n === 4
+                        ? '（清晨 / 正午 / 黄昏 / 深夜）'
+                        : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">
+                档数越多过渡越平滑，但每档要多写一组触发动作；24 小时按档数等分取点
+              </span>
+            </div>
+
+            <div className="field">
+              <label htmlFor="dayNightStartHour">开局钟点</label>
+              <input
+                id="dayNightStartHour"
+                type="number"
+                min={0}
+                max={23}
+                value={dayNightStartHour}
+                onChange={e => setDayNightStartHour(Number(e.target.value))}
+              />
+              <span className="field-hint">
+                0-23，默认 6（日出）。之后按"一轮总时长 / 档数"往下走，走完回到这一档
+              </span>
+            </div>
+
+            <div className="field">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={dayNightRetint}
+                  onChange={e => setDayNightRetint(e.target.checked)}
+                />
+                <span>同时改 RGB 色调（黄昏偏暖、夜里偏蓝）</span>
+              </label>
+              <span className="field-hint">
+                不勾 = 只改亮度（Action 73），天色是灰的；勾选 = 追加 142/143/144
+                三个通道，才是真正的"天黑泛蓝"
+              </span>
+            </div>
+          </div>
+        )}
+
+        {lastDayNight && (
+          <span className="field-hint">
+            上一张实际写入：一轮 {lastDayNight.cycleSeconds}s · {lastDayNight.stages.length} 档
+            （{lastDayNight.stages.map(s => `${s.hour}时/${s.seconds}s/${s.ambientPercent}%`).join(' → ')}）
+            · 事件 {lastDayNight.eventId} · 动作 [{lastDayNight.actions.join(',')}]
           </span>
         )}
       </section>

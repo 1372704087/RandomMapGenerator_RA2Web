@@ -125,13 +125,25 @@ async function run() {
     const waypoints = sectionOf(map, 'Waypoints') ?? {};
 
     check('4 个触发器', Object.keys(triggers).length === 4, String(Object.keys(triggers).length));
-    check('触发器都是循环（末位 2）', Object.values(triggers).every(v => v.endsWith(',2')));
     check(
-      '每个点位间隔 = 600 × 4 = 2400 秒',
-      Object.values(events).every(v => v === '13,0,2400'),
+      '循环靠 tag 持久值 2（触发器末位 0 = 不可 transfer，不是循环标志）',
+      Object.values(tags).every(v => v.startsWith('2,')) &&
+        Object.values(triggers).every(v => v.endsWith(',0')),
+      Object.values(tags).join(' | '),
+    );
+    check(
+      '每个点位间隔 = 600 × 4 = 2400 秒（[Events] 带数量前缀）',
+      Object.values(events).every(v => v === '1,13,0,2400'),
       Object.values(events).join(' | '),
     );
     check('4 个 tag', Object.keys(tags).length === 4, String(Object.keys(tags).length));
+    const cellTags = sectionOf(map, 'CellTags') ?? {};
+    const tagIds = Object.keys(tags);
+    check(
+      '每个 tag 都挂到一个格子（[CellTags]，否则永不评估）',
+      Object.keys(cellTags).length === tagIds.length && tagIds.every(t => Object.values(cellTags).includes(t)),
+      Object.entries(cellTags).map(([k, v]) => `${k}=${v}`).join(' '),
+    );
 
     const headerSize = sectionOf(map, 'Header') ?? {};
     const W = Number(headerSize.Width);
@@ -141,12 +153,19 @@ async function run() {
     let actionOk = true;
     Object.values(actions).forEach((value, i) => {
       const parts = value.split(',');
-      const waypoint = Number(parts[7]);
-      if (parts[0] !== '102' || waypoint !== 16 + i) actionOk = false;
+      // [Actions] 格式：数量, 动作号, P1..P6, P7（waypoint 的字母编码）
+      const id = Number(parts[1]);
+      const letter = parts[8];
+      const waypoint = letter.charCodeAt(0) - 65;
+      if (id !== 102 || waypoint !== 16 + i) actionOk = false;
       const cell = parseCell(waypoints[String(waypoint)] ?? '');
       siteCells.push(cell);
     });
-    check('Action 102 依次指向 waypoint 16..19', actionOk, Object.values(actions).join(' | '));
+    check(
+      'Action 102 依次指向 waypoint 16..19（字母 Q/R/S/T）',
+      actionOk,
+      Object.values(actions).join(' | '),
+    );
     check(
       '点位都在图内',
       siteCells.every(c => c.x >= 0 && c.x < W && c.y >= 0 && c.y < H),
@@ -180,7 +199,7 @@ async function run() {
     );
     check(
       'sites=1：间隔 600',
-      Object.values(sectionOf(map, 'Events') ?? {})[0] === '13,0,600',
+      Object.values(sectionOf(map, 'Events') ?? {})[0] === '1,13,0,600',
       Object.values(sectionOf(map, 'Events') ?? {})[0],
     );
   }
@@ -195,7 +214,7 @@ async function run() {
     const header = JSON.parse(random.headers.ionStorm ?? '{}');
     check(
       'randomize：Event 51/1800（900 × 2）',
-      Object.values(sectionOf(map, 'Events') ?? {}).every(v => v === '51,0,1800'),
+      Object.values(sectionOf(map, 'Events') ?? {}).every(v => v === '1,51,0,1800'),
       Object.values(sectionOf(map, 'Events') ?? {}).join(' | '),
     );
     check('randomize：回显 eventId 51', header.eventId === 51, String(header.eventId));

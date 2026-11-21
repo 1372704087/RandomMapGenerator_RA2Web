@@ -41,7 +41,7 @@ import {
 import { generateRmgCxx } from './rmgCxxService';
 import { renderCncmapsPreview } from './cncmapsPreview';
 import { putMap, getMap } from './mapHandoff';
-import { GenerateOptions, LightingRequest, IonStormRequest } from './types';
+import { GenerateOptions, LightingRequest, IonStormRequest, DayNightRequest } from './types';
 
 // ---------------------------------------------------------------------------
 // 服务器配置
@@ -233,9 +233,27 @@ app.post(
           }),
         );
       }
+      if (result.dayNight) {
+        // 昼夜交替回显：一轮时长、各档钟点与时长、实际用到的事件/动作
+        res.setHeader(
+          'X-Map-DayNight',
+          JSON.stringify({
+            cycleSeconds: result.dayNight.cycleSeconds,
+            environment: result.dayNight.environment,
+            stages: result.dayNight.stages.map((s) => ({
+              hour: s.hour,
+              seconds: s.seconds,
+              ambientPercent: s.ambientPercent,
+            })),
+            eventId: result.dayNight.eventId,
+            actions: result.dayNight.actions,
+            cells: result.dayNight.cellTags.map((c) => c.key),
+          }),
+        );
+      }
       res.setHeader(
         'Access-Control-Expose-Headers',
-        'X-Map-Key, X-Map-Seed, X-Map-Lighting, X-Map-IonStorm, Content-Disposition',
+        'X-Map-Key, X-Map-Seed, X-Map-Lighting, X-Map-IonStorm, X-Map-DayNight, Content-Disposition',
       );
 
       res.send(result.mapContent);
@@ -688,6 +706,12 @@ function validateGenerateOptions(options: GenerateOptions): string | null {
     return ionStormError;
   }
 
+  // 昼夜交替：可选，给了就得是合法组合
+  const dayNightError = validateDayNightRequest(options.dayNight);
+  if (dayNightError) {
+    return dayNightError;
+  }
+
   // totalRandom 模式下不需要 playerLocations
   if (!options.totalRandom) {
     if (!options.playerLocations || typeof options.playerLocations !== 'object') {
@@ -913,6 +937,69 @@ function validateIonStormRequest(ionStorm: IonStormRequest | undefined): string 
         return `ionStorm.values.${key} must be a number between 0 and 1000`;
       }
     }
+  }
+
+  return null;
+}
+
+/**
+ * 校验昼夜交替入参。
+ *
+ * 错误文案固定（验收脚本按这些字符串断言）：
+ * - `dayNight must be an object`
+ * - `dayNight.enabled must be a boolean`
+ * - `dayNight.cycleSeconds must be an integer between 60 and 7200`
+ * - `dayNight.stages must be an integer between 2 and 8`
+ * - `dayNight.startHour must be an integer between 0 and 23`
+ * - `dayNight.retint must be a boolean`
+ */
+function validateDayNightRequest(dayNight: DayNightRequest | undefined): string | null {
+  if (dayNight === undefined || dayNight === null) {
+    return null;
+  }
+  if (typeof dayNight !== 'object' || Array.isArray(dayNight)) {
+    return 'dayNight must be an object';
+  }
+
+  if (dayNight.enabled !== undefined && typeof dayNight.enabled !== 'boolean') {
+    return 'dayNight.enabled must be a boolean';
+  }
+
+  if (dayNight.cycleSeconds !== undefined) {
+    if (
+      typeof dayNight.cycleSeconds !== 'number' ||
+      !Number.isInteger(dayNight.cycleSeconds) ||
+      dayNight.cycleSeconds < 60 ||
+      dayNight.cycleSeconds > 7200
+    ) {
+      return 'dayNight.cycleSeconds must be an integer between 60 and 7200';
+    }
+  }
+
+  if (dayNight.stages !== undefined) {
+    if (
+      typeof dayNight.stages !== 'number' ||
+      !Number.isInteger(dayNight.stages) ||
+      dayNight.stages < 2 ||
+      dayNight.stages > 8
+    ) {
+      return 'dayNight.stages must be an integer between 2 and 8';
+    }
+  }
+
+  if (dayNight.startHour !== undefined) {
+    if (
+      typeof dayNight.startHour !== 'number' ||
+      !Number.isInteger(dayNight.startHour) ||
+      dayNight.startHour < 0 ||
+      dayNight.startHour > 23
+    ) {
+      return 'dayNight.startHour must be an integer between 0 and 23';
+    }
+  }
+
+  if (dayNight.retint !== undefined && typeof dayNight.retint !== 'boolean') {
+    return 'dayNight.retint must be a boolean';
   }
 
   return null;

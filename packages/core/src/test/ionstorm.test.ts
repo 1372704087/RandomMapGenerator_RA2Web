@@ -33,6 +33,7 @@ import {
   ION_STORM_MIN_INTERVAL,
   ION_STORM_MAX_INTERVAL,
 } from '../ionstorm';
+import { waypointLetter } from '../trigger';
 
 const BASE = `[Header]
 Width=95
@@ -100,6 +101,7 @@ describe('随机离子风暴', () => {
     const events = section(ini, 'Events');
     const actions = section(ini, 'Actions');
     const waypoints = section(ini, 'Waypoints');
+    const cellTags = section(ini, 'CellTags');
 
     assert.equal(ionStorm?.siteCount, ION_STORM_DEFAULT_SITES);
     assert.equal(Object.keys(triggers).length, ION_STORM_DEFAULT_SITES);
@@ -108,10 +110,18 @@ describe('随机离子风暴', () => {
       const triggerId = hexId(ION_STORM_TRIGGER_BASE + i);
       const tagId = hexId(ION_STORM_TAG_BASE + i);
       const waypoint = ION_STORM_WAYPOINT_BASE + i;
-      assert.equal(triggers[triggerId], 'Neutral,<none>,Random Ion Storm,0,1,1,1,2');
-      assert.equal(events[triggerId], `${ION_STORM_EVENT_PERIODIC},0,2400`);
-      assert.equal(actions[triggerId], `${ION_STORM_ACTION},0,0,0,0,0,0,${waypoint}`);
+      assert.equal(triggers[triggerId], 'Neutral,<none>,Random Ion Storm,0,1,1,1,0');
+      assert.equal(events[triggerId], `1,${ION_STORM_EVENT_PERIODIC},0,2400`);
+      assert.equal(
+        actions[triggerId],
+        `1,${ION_STORM_ACTION},0,0,0,0,0,0,${waypointLetter(waypoint)}`,
+      );
       assert.equal(tags[tagId], `2,RANDOM ION STORM ${i + 1},${triggerId}`);
+      // tag 必须挂到点位的格子上，否则永远不会被评估
+      assert.equal(
+        cellTags[formatWaypointCell(ionStorm!.sites[i].cell.x, ionStorm!.sites[i].cell.y)],
+        tagId,
+      );
       assert.match(waypoints[String(waypoint)] ?? '', /^\d{4,5}$/);
     }
     // 原有出生点不受影响
@@ -140,7 +150,7 @@ describe('随机离子风暴', () => {
     assert.equal(Object.keys(section(ini, 'Triggers')).length, 1);
     assert.equal(
       Object.values(section(ini, 'Events'))[0],
-      `${ION_STORM_EVENT_PERIODIC},0,600`,
+      `1,${ION_STORM_EVENT_PERIODIC},0,600`,
     );
   });
 
@@ -154,7 +164,7 @@ describe('随机离子风暴', () => {
     const events = section(new IniFile(iniContent), 'Events');
     assert.equal(
       events[hexId(ION_STORM_TRIGGER_BASE)],
-      `${ION_STORM_EVENT_RANDOM},0,1800`,
+      `1,${ION_STORM_EVENT_RANDOM},0,1800`,
     );
     assert.equal(ionStorm?.eventId, ION_STORM_EVENT_RANDOM);
     assert.equal(ionStorm?.intervalSeconds, 900);
@@ -192,7 +202,7 @@ describe('随机离子风暴', () => {
     const second = applyIonStorm(first, { enabled: true, sites: 3 }, 95, 89).iniContent;
     const triggers = section(new IniFile(second), 'Triggers');
     assert.equal(Object.keys(triggers).length, 3);
-    assert.equal(triggers[hexId(ION_STORM_TRIGGER_BASE)], 'Neutral,<none>,Random Ion Storm,0,1,1,1,2');
+    assert.equal(triggers[hexId(ION_STORM_TRIGGER_BASE)], 'Neutral,<none>,Random Ion Storm,0,1,1,1,0');
   });
 
   it('waypoint 值格式为 Y + 三位 X', () => {

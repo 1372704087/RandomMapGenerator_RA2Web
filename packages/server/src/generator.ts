@@ -25,6 +25,7 @@ import {
   jitterLighting,
   theaterToLightingEnvironment,
   applyIonStorm,
+  applyDayNight,
 } from '@ra2/core';
 import {
   getTheaterResources,
@@ -374,6 +375,16 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
   const lightingStep = applyLighting(mapFile, ini, theater, options);
   ini = lightingStep.iniContent;
 
+  // 步骤 14b: 昼夜交替（覆盖 [Lighting] 的基础五键，触发链在游戏里循环切光）
+  const dayNightStep = applyDayNight(
+    ini,
+    options.dayNight,
+    options.theaterType,
+    mapFile.Width,
+    mapFile.Height,
+  );
+  ini = dayNightStep.iniContent;
+
   // 步骤 15: 设置游戏模式
   if (options.gamemode) {
     ini = mapFile.ChangeGamemode(ini, options.gamemode);
@@ -417,6 +428,7 @@ function doGenerateMap(options: GenerateOptions): GenerateResult {
     seed,
     lighting: lightingStep.lighting,
     ionStorm: ionStormStep.ionStorm,
+    dayNight: dayNightStep.dayNight,
   };
 }
 

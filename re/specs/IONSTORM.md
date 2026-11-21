@@ -63,31 +63,43 @@ IonBlue=0.775000
 18=<Y><XXX>   ; 点位 3
 19=<Y><XXX>   ; 点位 4
 
-[Triggers]
-0E000000=Neutral,<none>,Random Ion Storm,0,1,1,1,2   ; 末位 2 = 循环
-0E000001=Neutral,<none>,Random Ion Storm,0,1,1,1,2
-0E000002=Neutral,<none>,Random Ion Storm,0,1,1,1,2
-0E000003=Neutral,<none>,Random Ion Storm,0,1,1,1,2
-[Events]
-0E000000=13,0,2400            ; 每个点位 2400 秒 = 600 × 4
-0E000001=13,0,2400
-0E000002=13,0,2400
-0E000003=13,0,2400
-[Actions]
-0E000000=102,0,0,0,0,0,0,16  ; 第 7 个参数是 waypoint 编号
-0E000001=102,0,0,0,0,0,0,17
-0E000002=102,0,0,0,0,0,0,18
-0E000003=102,0,0,0,0,0,0,19
-[Tags]
+[Triggers]                        ; HOUSE,<linked>,NAME,DISABLED,EASY,NORMAL,HARD,TRANSFERABLE
+0E000000=Neutral,<none>,Random Ion Storm,0,1,1,1,0
+0E000001=Neutral,<none>,Random Ion Storm,0,1,1,1,0
+0E000002=Neutral,<none>,Random Ion Storm,0,1,1,1,0
+0E000003=Neutral,<none>,Random Ion Storm,0,1,1,1,0
+[Events]                          ; NUM,E1,E1P1,E1P2 —— 第一个字段是"数量"
+0E000000=1,13,0,2400              ; 1 个事件：Event 13 等 2400 秒（= 600 × 4 点位）
+0E000001=1,13,0,2400
+0E000002=1,13,0,2400
+0E000003=1,13,0,2400
+[Actions]                         ; NUM,A1,A1P1..A1P7
+0E000000=1,102,0,0,0,0,0,0,Q      ; 1 个动作：Action 102，P7 = waypoint 16 的字母编码 Q
+0E000001=1,102,0,0,0,0,0,0,R      ; 17 → R
+0E000002=1,102,0,0,0,0,0,0,S      ; 18 → S
+0E000003=1,102,0,0,0,0,0,0,T      ; 19 → T
+[Tags]                            ; 持久值,NAME,TRIGGERID（2 = 永久，循环的载体）
 0E000010=2,RANDOM ION STORM 1,0E000000
 0E000011=2,RANDOM ION STORM 2,0E000001
 0E000012=2,RANDOM ION STORM 3,0E000002
 0E000013=2,RANDOM ION STORM 4,0E000003
+[CellTags]                        ; tag 必须挂到格子上才会被评估，每点位挂自己的格子
+<Y><XXX>=0E000010                 ; 点位 1 的格子
+<Y><XXX>=0E000011                 ; 点位 2
+<Y><XXX>=0E000012                 ; 点位 3
+<Y><XXX>=0E000013                 ; 点位 4
 ```
 
 触发器行的字段顺序照抄游戏自带模板地图（`packages/server/resources/MapUnits/*` 里
 `spawn_s_*.map` 的 `[Triggers] 01000000=Americans,<none>,cell,0,1,1,1,0`）：
-`House,<嵌套触发器>,名字,禁用?,简单,普通,困难,循环标志`。
+`House,<嵌套触发器>,名字,禁用?,简单,普通,困难,TRANSFERABLE`。
+**第 8 位不是循环标志**：0 = 不可 transfer（tag 易手时触发器不跟着走），
+循环由 `[Tags]` 的持久值控制（0 = 触发一次即销毁、1 = 可用两次、2 = 永久）。
+
+> 三个编码坑（上一版写错过，现已修，`verify-ionstorm.mjs` 里逐条断言）：
+> ① `[Events]`/`[Actions]` 少了开头的**数量**字段；② `Action 102` 的 P7 写成十进制 `16` 而非字母 `Q`；
+> ③ 只写 `[Tags]` 没写 `[CellTags]`，tag 无载体、永不触发。
+> 详见 `re/specs/DAYNIGHT.md` 第三节。
 
 ## 四、与 FlyingZ 脚本的差异（有意为之）
 
@@ -97,7 +109,7 @@ IonBlue=0.775000
 | `[LightningStormSpecial] DisableableFromShell=no` | **不写** | 该键只影响"禁止超级武器"勾选项是否关掉闪电风暴这个**超武**；本功能走 trigger，不改超武定义 |
 | `LightningPrintText=false` | **不写** | YR 的 `rulesmd.ini` 里没有这个键（TS 遗留） |
 | 数值 40 / 2000 / 2000 / 180 | **不用**，用原版 250 / 180 / 10 / 10 | 脚本那套是"面积覆盖全图、几乎打不死东西"的观赏型；本功能按原版实战强度 |
-| 只触发一次（`Type` 末位 0） | **循环**（末位 2） | 需求是"周期性" |
+| 只触发一次 | **循环**（`[Tags]` 持久值 2 + Event 13 重新计时） | 需求是"周期性" |
 | waypoint 放在 `(Width, Height)` 角落 | **内缩 10% 的片区内随机** | 角落 + 散布会把一半的雷打在地图外 |
 
 ## 五、接口
@@ -139,15 +151,18 @@ IonBlue=0.775000
   - 点位的 RNG 来自 `MapFile.Randomizer`，所以点位受 `seed` 约束、可复现。
 - 必须在**环境光照之后**调用：`MapFile.ChangeLighting` 会把未显式给出的 `Ion*` 删掉。
 - 生成器里挂在步骤 16b（光照 + `addition.ini` 合并之后、改名之前）。
-- waypoint 编号从 `16` 起：两位数以内的编号在 action 参数里直接写十进制；超过 99 的
-  waypoint 在 FA2 的 action 参数里要写成两位字母编码，容易踩坑，所以最多 12 个点位。
+# 步骤顺序提醒：光照 → **昼夜交替（14b）** → addition.ini → 本功能（16b）。
+# 昼夜会重写 `[Lighting]` 五键，但它只改 Ambient/RGB，不动 `Ion*`，所以两者可以共存。
+- waypoint 编号从 `16` 起；`Action 102` 的 P7 **必须写字母编码**（16 → `Q`、17 → `R`、
+  25 → `Z`、26 → `AA`），由 `trigger.ts` 的 `waypointLetter()` 统一转换。最多 12 个点位。
 
 ## 七、验收
 
-- `scripts/verify-ionstorm.mjs`：**41 pass / 0 fail**（开关行为、七条原版数值、
-  4 组触发链、点位在图内且互不重复、sites=1 回落、Event 13/51 切换、
+- `scripts/verify-ionstorm.mjs`：**42 pass / 0 fail**（开关行为、七条原版数值、
+  4 组触发链、`[Events]`/`[Actions]` 数量前缀、P7 字母、`[CellTags]` 挂载、
+  点位在图内且互不重复、sites=1 回落、Event 13/51 切换、
   平均间隔 = 单点间隔 × 点数、七种非法参数 400）
-- core 单测：**223 pass / 0 fail**（`ionstorm.test.ts` 14 例，含点位复现性）
+- core 单测：**238 pass / 0 fail**（`ionstorm.test.ts` 14 例，含点位复现性与新编码断言）
 - 生成后 cncmaps 渲染正常（`POST /api/cncmaps-preview` → 200 image/png）
 
 ## 八、已知限制

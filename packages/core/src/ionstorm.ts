@@ -20,17 +20,31 @@
  *   - `[General]` 的 Lightning* 数值（伤害、持续、命中间隔、散布范围）
  * 这里默认用 **rulesmd.ini 的原版数值**，即和天气控制机（GAWEAT）放出的大招一致。
  *
- * 触发链的书写格式照抄游戏自带模板地图（`packages/server/resources/MapUnits/*`）：
- *   [Triggers] 0E000000=Neutral,<none>,Random Ion Storm,0,1,1,1,2
- *   [Events]   0E000000=13,0,2400
- *   [Actions]  0E000000=102,0,0,0,0,0,0,16
+ * 触发链的书写格式按 ModEnc（`Triggers` / `Events` / `Actions (maps)/RA2YR`）：
+ *   [Triggers] 0E000000=Neutral,<none>,Random Ion Storm,0,1,1,1,0
+ *   [Events]   0E000000=1,13,0,2400          ← 首位是"条件数量"
+ *   [Actions]  0E000000=1,102,0,0,0,0,0,0,Q  ← 首位是"动作数量"，P7 用字母（16 = "Q"）
  *   [Tags]     0E000010=2,RANDOM ION STORM 1,0E000000
+ *   [CellTags] <y><xxx>=0E000010             ← tag 必须挂到格子上才会被处理
  *   [Waypoints] 16=<Y><XXX>
- * 触发器第 5 个数字是"0=只触发一次 / 2=循环"，模板与 FA2 输出都用 0,1,1,1 前缀。
+ *
+ * 三个曾经踩过的坑，都已在 `trigger.ts` 里统一处理：
+ * 1. `[Events]` / `[Actions]` 少了数量前缀 → 引擎会把动作号当数量读，整条链失效；
+ * 2. 动作 P7（waypoint）直接写十进制数字 → ModEnc 明确要求字母编码（0=A、16=Q）；
+ * 3. tag 只写进 `[Tags]` 却没挂 `[CellTags]` → 没有载体，永远不会被评估。
  */
 
 import { IniFile } from './io/iniFile';
 import { Random } from './random';
+import {
+  formatActions,
+  formatEvents,
+  formatWaypointCell,
+  hexId,
+  waypointLetter,
+} from './trigger';
+
+export { hexId, formatWaypointCell } from './trigger';
 
 /** `[General]` 里的闪电风暴数值（原版 rulesmd.ini 的量级）。 */
 export interface IonStormValues {
@@ -159,15 +173,7 @@ function clampSites(value: number | undefined): number {
   return Math.min(ION_STORM_MAX_SITES, Math.max(ION_STORM_MIN_SITES, Math.round(value)));
 }
 
-/** 8 位大写十六进制 ID（与地图里的 `[Triggers]` 键一致）。 */
-export function hexId(value: number): string {
-  return value.toString(16).toUpperCase().padStart(8, '0');
-}
-
 /** `[Waypoints]` 的值格式：`<y><xxx>`（y 不加前导零，x 补 3 位）。 */
-export function formatWaypointCell(x: number, y: number): string {
-  return `${y}${String(x).padStart(3, '0')}`;
-}
 
 /**
  * 选风暴点位。
@@ -303,6 +309,7 @@ export function applyIonStorm(
   const events = mapFile.GetSection('Events') ?? mapFile.AddSection('Events');
   const actions = mapFile.GetSection('Actions') ?? mapFile.AddSection('Actions');
   const tags = mapFile.GetSection('Tags') ?? mapFile.AddSection('Tags');
+  const cellTags = mapFile.GetSection('CellTags') ?? mapFile.AddSection('CellTags');
 
   const resultSites: IonStormSite[] = sites.map((site, index) => {
     const triggerId = hexId(ION_STORM_TRIGGER_BASE + index);
@@ -312,12 +319,20 @@ export function applyIonStorm(
       String(site.waypoint),
       formatWaypointCell(site.cell.x, site.cell.y),
     );
-    // 触发器：循环（2 = repeating），前三项难度全开
-    triggers.SetStringValue(triggerId, 'Neutral,<none>,Random Ion Storm,0,1,1,1,2');
-    events.SetStringValue(triggerId, `${eventId},0,${perSiteInterval}`);
-    // Action 102 的第 7 个参数是 waypoint 编号
-    actions.SetStringValue(triggerId, `${ION_STORM_ACTION},0,0,0,0,0,0,${site.waypoint}`);
+    // 触发器：第 8 位是 TRANSFERABLE（不是循环标志），循环靠 tag 的持久值 2
+    triggers.SetStringValue(triggerId, 'Neutral,<none>,Random Ion Storm,0,1,1,1,0');
+    events.SetStringValue(
+      triggerId,
+      formatEvents([{ id: eventId, params: [0, perSiteInterval] }]),
+    );
+    // Action 102 的 P7 是 waypoint，按 ModEnc 必须写成字母（16 → "Q"）
+    actions.SetStringValue(
+      triggerId,
+      formatActions([{ id: ION_STORM_ACTION, p7: waypointLetter(site.waypoint) }]),
+    );
     tags.SetStringValue(tagId, `2,RANDOM ION STORM ${index + 1},${triggerId}`);
+    // tag 挂到点位所在的格子上，否则没有载体、永远不会被评估
+    cellTags.SetStringValue(formatWaypointCell(site.cell.x, site.cell.y), tagId);
 
     return {
       waypoint: site.waypoint,
