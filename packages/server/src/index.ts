@@ -909,9 +909,9 @@ function validateIonStormRequest(ionStorm: IonStormRequest | undefined): string 
       typeof ionStorm.sites !== 'number' ||
       !Number.isInteger(ionStorm.sites) ||
       ionStorm.sites < 1 ||
-      ionStorm.sites > 12
+      ionStorm.sites > 64
     ) {
-      return 'ionStorm.sites must be an integer between 1 and 12';
+      return 'ionStorm.sites must be an integer between 1 and 64';
     }
   }
 

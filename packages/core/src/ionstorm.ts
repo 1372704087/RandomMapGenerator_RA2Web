@@ -136,9 +136,9 @@ export const ION_STORM_MIN_INTERVAL = 30;
 export const ION_STORM_MAX_INTERVAL = 3600;
 export const ION_STORM_DEFAULT_INTERVAL = 600;
 
-/** 点位数范围。 */
+/** 点位数范围：越多越接近"任意格"，上限受 waypoint 的字母编码（两位字母 = 676 个）与地图面积约束。 */
 export const ION_STORM_MIN_SITES = 1;
-export const ION_STORM_MAX_SITES = 12;
+export const ION_STORM_MAX_SITES = 64;
 export const ION_STORM_DEFAULT_SITES = 4;
 
 /** 首个 waypoint 编号。两位数以内的编号在 action 参数里可直接写十进制。 */
@@ -152,6 +152,9 @@ export const ION_STORM_EVENT_PERIODIC = 13;
 export const ION_STORM_EVENT_RANDOM = 51;
 /** Action 102 = Lightning Storm strike（在 waypoint 处起风暴）。 */
 export const ION_STORM_ACTION = 102;
+/** Action 53 = Enable Trigger / 54 = Disable Trigger：环形轮转用（P2 = 触发器 ID）。 */
+export const ION_STORM_ACTION_ENABLE = 53;
+export const ION_STORM_ACTION_DISABLE = 54;
 
 /** 兼容旧名：单点位时用的 waypoint 编号。 */
 export const ION_STORM_WAYPOINT = ION_STORM_WAYPOINT_BASE;
@@ -298,11 +301,17 @@ export function applyIonStorm(
   }
 
   const sites = pickStormSites(mapWidth, mapHeight, options.sites ?? ION_STORM_DEFAULT_SITES, rng);
+  // 严格周期 + 多点位：环形轮转，每 intervalSeconds 劈一次、落点按池子顺序轮换。
+  // 早期版本是把 N 个点位全部常开、间隔都设成 interval * N —— 结果 N 个点**同时**劈，
+  // 且整局要等 N * interval 秒才出现一次（4 点位就是 40 分钟一波齐射）。
+  const ring = !randomize && sites.length > 1;
   const perSiteInterval = Math.min(
     24 * 3600,
     intervalSeconds * sites.length,
   );
   const eventId = randomize ? ION_STORM_EVENT_RANDOM : ION_STORM_EVENT_PERIODIC;
+  // 环形链每一档只等一个 intervalSeconds；单点位/随机窗口沿用"每点位一个周期"
+  const waitSeconds = ring ? intervalSeconds : perSiteInterval;
 
   const waypoints = mapFile.GetSection('Waypoints') ?? mapFile.AddSection('Waypoints');
   const triggers = mapFile.GetSection('Triggers') ?? mapFile.AddSection('Triggers');
@@ -314,22 +323,34 @@ export function applyIonStorm(
   const resultSites: IonStormSite[] = sites.map((site, index) => {
     const triggerId = hexId(ION_STORM_TRIGGER_BASE + index);
     const tagId = hexId(ION_STORM_TAG_BASE + index);
+    const nextTriggerId = hexId(ION_STORM_TRIGGER_BASE + ((index + 1) % sites.length));
 
     waypoints.SetStringValue(
       String(site.waypoint),
       formatWaypointCell(site.cell.x, site.cell.y),
     );
-    // 触发器：第 8 位是 TRANSFERABLE（不是循环标志），循环靠 tag 的持久值 2
-    triggers.SetStringValue(triggerId, 'Neutral,<none>,Random Ion Storm,0,1,1,1,0');
+    // 触发器：第 8 位是 TRANSFERABLE（不是循环标志），循环靠 tag 的持久值 2。
+    // 环形链只有第 0 个开局启用，其余等前一档把自己叫起来。
+    triggers.SetStringValue(
+      triggerId,
+      `Neutral,<none>,Random Ion Storm,${ring && index > 0 ? 1 : 0},1,1,1,0`,
+    );
     events.SetStringValue(
       triggerId,
-      formatEvents([{ id: eventId, params: [0, perSiteInterval] }]),
+      formatEvents([{ id: eventId, params: [0, waitSeconds] }]),
     );
-    // Action 102 的 P7 是 waypoint，按 ModEnc 必须写成字母（16 → "Q"）
-    actions.SetStringValue(
-      triggerId,
-      formatActions([{ id: ION_STORM_ACTION, p7: waypointLetter(site.waypoint) }]),
-    );
+    // 环形链：劈一次 → 把链交给下一个点位 → 关掉自己（被前一个点位重新启用时从 0 计时）。
+    // Action 102 的 P7 是 waypoint，按 ModEnc 必须写成字母（16 → "Q"）。
+    const blocks: Array<{ id: number; params?: Array<number | string>; p7?: string }> = [
+      { id: ION_STORM_ACTION, p7: waypointLetter(site.waypoint) },
+    ];
+    if (ring) {
+      blocks.push(
+        { id: ION_STORM_ACTION_ENABLE, params: [0, nextTriggerId] },
+        { id: ION_STORM_ACTION_DISABLE, params: [0, triggerId] },
+      );
+    }
+    actions.SetStringValue(triggerId, formatActions(blocks));
     tags.SetStringValue(tagId, `2,RANDOM ION STORM ${index + 1},${triggerId}`);
     // tag 挂到点位所在的格子上，否则没有载体、永远不会被评估
     cellTags.SetStringValue(formatWaypointCell(site.cell.x, site.cell.y), tagId);
@@ -339,7 +360,7 @@ export function applyIonStorm(
       cell: site.cell,
       triggerId,
       tagId,
-      intervalSeconds: perSiteInterval,
+      intervalSeconds: waitSeconds,
     };
   });
 

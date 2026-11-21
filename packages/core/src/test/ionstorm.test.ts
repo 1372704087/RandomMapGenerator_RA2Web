@@ -25,6 +25,8 @@ import {
   ION_STORM_EVENT_PERIODIC,
   ION_STORM_EVENT_RANDOM,
   ION_STORM_ACTION,
+  ION_STORM_ACTION_ENABLE,
+  ION_STORM_ACTION_DISABLE,
   ION_STORM_DEFAULT_SITES,
   ION_STORM_MAX_SITES,
   formatWaypointCell,
@@ -93,7 +95,7 @@ describe('随机离子风暴', () => {
     assert.equal(lighting.Ambient, '1.000000');
   });
 
-  it('默认 4 个点位：4 个 trigger / tag / waypoint，间隔为平均值 × 4', () => {
+  it('默认 4 个点位：环形轮转，每 600 秒劈一次、落点轮换', () => {
     const { iniContent, ionStorm } = applyIonStorm(BASE, { enabled: true }, 95, 89);
     const ini = new IniFile(iniContent);
     const triggers = section(ini, 'Triggers');
@@ -108,13 +110,21 @@ describe('随机离子风暴', () => {
     assert.equal(Object.keys(tags).length, ION_STORM_DEFAULT_SITES);
     for (let i = 0; i < ION_STORM_DEFAULT_SITES; i++) {
       const triggerId = hexId(ION_STORM_TRIGGER_BASE + i);
+      const nextId = hexId(ION_STORM_TRIGGER_BASE + ((i + 1) % ION_STORM_DEFAULT_SITES));
       const tagId = hexId(ION_STORM_TAG_BASE + i);
       const waypoint = ION_STORM_WAYPOINT_BASE + i;
-      assert.equal(triggers[triggerId], 'Neutral,<none>,Random Ion Storm,0,1,1,1,0');
-      assert.equal(events[triggerId], `1,${ION_STORM_EVENT_PERIODIC},0,2400`);
+      // 环形链：只有第 0 档开局启用，其余等前一档叫起来
+      assert.equal(
+        triggers[triggerId],
+        `Neutral,<none>,Random Ion Storm,${i === 0 ? 0 : 1},1,1,1,0`,
+      );
+      // 每一档只等一个 intervalSeconds，不是 interval × N（那会让 N 个点同时劈）
+      assert.equal(events[triggerId], `1,${ION_STORM_EVENT_PERIODIC},0,600`);
       assert.equal(
         actions[triggerId],
-        `1,${ION_STORM_ACTION},0,0,0,0,0,0,${waypointLetter(waypoint)}`,
+        `3,${ION_STORM_ACTION},0,0,0,0,0,0,${waypointLetter(waypoint)},` +
+          `${ION_STORM_ACTION_ENABLE},0,${nextId},0,0,0,0,A,` +
+          `${ION_STORM_ACTION_DISABLE},0,${triggerId},0,0,0,0,A`,
       );
       assert.equal(tags[tagId], `2,RANDOM ION STORM ${i + 1},${triggerId}`);
       // tag 必须挂到点位的格子上，否则永远不会被评估
@@ -123,9 +133,20 @@ describe('随机离子风暴', () => {
         tagId,
       );
       assert.match(waypoints[String(waypoint)] ?? '', /^\d{4,5}$/);
+      assert.equal(ionStorm!.sites[i].intervalSeconds, 600);
     }
     // 原有出生点不受影响
     assert.equal(waypoints['0'], '67067');
+  });
+
+  it('环形链首尾相接（末档 53 指回第一个点位）', () => {
+    const { iniContent } = applyIonStorm(BASE, { enabled: true, sites: 5 }, 95, 89);
+    const actions = section(new IniFile(iniContent), 'Actions');
+    const last = (actions[hexId(ION_STORM_TRIGGER_BASE + 4)] ?? '').split(',');
+    assert.equal(last[9], String(ION_STORM_ACTION_ENABLE));
+    assert.equal(last[11], hexId(ION_STORM_TRIGGER_BASE));
+    assert.equal(last[17], String(ION_STORM_ACTION_DISABLE));
+    assert.equal(last[19], hexId(ION_STORM_TRIGGER_BASE + 4));
   });
 
   it('点位都在图内且互不重复', () => {
@@ -170,17 +191,35 @@ describe('随机离子风暴', () => {
     assert.equal(ionStorm?.intervalSeconds, 900);
   });
 
-  it('间隔超界会被夹取（每个点位再 × 点位数）', () => {
+  it('间隔超界会被夹取', () => {
     const low = applyIonStorm(BASE, { enabled: true, intervalSeconds: 5, sites: 2 }, 95, 89);
     assert.equal(low.ionStorm?.intervalSeconds, ION_STORM_MIN_INTERVAL);
-    assert.equal(low.ionStorm?.sites[0].intervalSeconds, ION_STORM_MIN_INTERVAL * 2);
+    // 严格周期 + 多点位走环形链，每个点位等的就是一个 intervalSeconds
+    assert.equal(low.ionStorm?.sites[0].intervalSeconds, ION_STORM_MIN_INTERVAL);
     const high = applyIonStorm(BASE, { enabled: true, intervalSeconds: 99999, sites: 1 }, 95, 89);
     assert.equal(high.ionStorm?.intervalSeconds, ION_STORM_MAX_INTERVAL);
+    // 随机窗口模式下每个点位用的是 interval × 点位数
+    const rnd = applyIonStorm(BASE, { enabled: true, randomize: true, intervalSeconds: 600, sites: 2 }, 95, 89);
+    assert.equal(rnd.ionStorm?.sites[0].intervalSeconds, 1200);
   });
 
-  it('点位数超过上限被夹到 12', () => {
+  it('点位数超过上限被夹到 64', () => {
     const { ionStorm } = applyIonStorm(BASE, { enabled: true, sites: 99 }, 95, 89);
     assert.equal(ionStorm?.siteCount, ION_STORM_MAX_SITES);
+    assert.equal(ION_STORM_MAX_SITES, 64);
+  });
+
+  it('64 点位：waypoint 编号全部落在字母编码可表达的范围内', () => {
+    const { iniContent, ionStorm } = applyIonStorm(BASE, { enabled: true, sites: 64 }, 95, 89);
+    const waypoints = section(new IniFile(iniContent), 'Waypoints');
+    const cellTags = section(new IniFile(iniContent), 'CellTags');
+    assert.equal(ionStorm?.siteCount, 64);
+    assert.equal(Object.keys(cellTags).length, 64);
+    for (const site of ionStorm!.sites) {
+      // 16 → Q … 79 → CB，全在两位字母以内
+      assert.match(waypointLetter(site.waypoint), /^[A-Z]{1,2}$/);
+      assert.ok(waypoints[String(site.waypoint)] !== undefined);
+    }
   });
 
   it('数值可以单条覆盖，其余仍为原版', () => {

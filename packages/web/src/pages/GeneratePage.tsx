@@ -1114,13 +1114,13 @@ export default function GeneratePage() {
                 id="ionStormSites"
                 type="number"
                 min={1}
-                max={12}
+                max={64}
                 value={ionStormSites}
                 onChange={e => setIonStormSites(Number(e.target.value))}
               />
               <span className="field-hint">
-                1 = 只在地图正中；2-12 = 把地图均分若干片、每片随机落一点（受 seed 约束可复现），
-                玩家看到的位置与顺序都不固定
+                1 = 只在地图正中；2-64 = 把地图均分若干片、每片随机落一点（受 seed 约束可复现）。
+                点位越多越接近"任意格"，64 处基本铺满全图，一轮之间不会重复同一点
               </span>
             </div>
 
@@ -1137,9 +1137,13 @@ export default function GeneratePage() {
               />
               <span className="field-hint">
                 {ionStormSites > 1
-                  ? `30-3600 秒；每个点位自己的间隔是 ${ionStormInterval} × ${ionStormSites} = ${
-                      ionStormInterval * ionStormSites
-                    } 秒，合起来平均 ${ionStormInterval} 秒一场`
+                  ? ionStormRandomize
+                    ? `30-3600 秒；随机窗口模式下每个点位各自在 ${
+                        ionStormInterval * ionStormSites
+                      } 秒的 0.5~1.5 倍之间随机触发，平均 ${ionStormInterval} 秒一场`
+                    : `30-3600 秒；严格周期模式下每 ${ionStormInterval} 秒劈一次，落点在 ${
+                        ionStormSites
+                      } 处之间轮换，一圈 ${ionStormInterval * ionStormSites} 秒`
                   : '30-3600 秒；默认 600（约 10 分钟一场），持续时长按原版 180 帧'}
               </span>
             </div>

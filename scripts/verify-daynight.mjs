@@ -243,8 +243,8 @@ async function main() {
     const trig = sectionOf(r.mapContent, 'Triggers') ?? {};
     check('两套触发器共存（4 昼夜 + 4 风暴 = 8）', Object.keys(trig).length === 8, String(Object.keys(trig).length));
     const acts = sectionOf(r.mapContent, 'Actions') ?? {};
-    check('风暴动作 P7 是字母（waypoint 16 → Q）',
-      (acts['0E000000'] ?? '').endsWith(',Q'), acts['0E000000']);
+    check('风暴动作第一条 P7 是字母（waypoint 16 → Q）',
+      (acts['0E000000'] ?? '').split(',')[8] === 'Q', acts['0E000000']);
     const cells = sectionOf(r.mapContent, 'CellTags') ?? {};
     check('8 个 celltag 互不冲突', Object.keys(cells).length === 8, String(Object.keys(cells).length));
   }

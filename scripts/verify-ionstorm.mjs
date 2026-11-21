@@ -132,9 +132,23 @@ async function run() {
       Object.values(tags).join(' | '),
     );
     check(
-      '每个点位间隔 = 600 × 4 = 2400 秒（[Events] 带数量前缀）',
-      Object.values(events).every(v => v === '1,13,0,2400'),
+      '每点位只等 600 秒（严格模式走环形链，不是 600×4 齐射）',
+      Object.values(events).every(v => v === '1,13,0,600'),
       Object.values(events).join(' | '),
+    );
+    check(
+      '环形链：只有第 0 个开局启用，其余禁用',
+      Object.values(triggers).every((v, i) => v === `Neutral,<none>,Random Ion Storm,${i === 0 ? 0 : 1},1,1,1,0`),
+      Object.values(triggers).join(' | '),
+    );
+    check(
+      '每个点位都是 3 个动作：102 → 53（启用下一档）→ 54（禁用自己）',
+      Object.values(actions).every((v, i) => {
+        const p = v.split(',');
+        return p[0] === '3' && p[1] === '102' && p[9] === '53' && p[17] === '54' &&
+          p[11] === `0E00000${(i + 1) % 4}` && p[19] === `0E00000${i}`;
+      }),
+      Object.values(actions).join(' | '),
     );
     check('4 个 tag', Object.keys(tags).length === 4, String(Object.keys(tags).length));
     const cellTags = sectionOf(map, 'CellTags') ?? {};
@@ -202,6 +216,31 @@ async function run() {
       Object.values(sectionOf(map, 'Events') ?? {})[0] === '1,13,0,600',
       Object.values(sectionOf(map, 'Events') ?? {})[0],
     );
+    check(
+      'sites=1：只有一个 102 动作（单点位不需要环形链）',
+      Object.values(sectionOf(map, 'Actions') ?? {})[0]?.split(',')[0] === '1',
+      Object.values(sectionOf(map, 'Actions') ?? {})[0],
+    );
+  }
+
+  // 3b. sites=64：铺满全图
+  {
+    const dense = await generate({ ...BASE_BODY, ionStorm: { enabled: true, sites: 64, intervalSeconds: 600 } });
+    const map = dense.mapContent ?? '';
+    const header = JSON.parse(dense.headers.ionStorm ?? '{}');
+    const trig = sectionOf(map, 'Triggers') ?? {};
+    const cells = sectionOf(map, 'CellTags') ?? {};
+    const ways = sectionOf(map, 'Waypoints') ?? {};
+    check('sites=64：被接受且回显 64', header.siteCount === 64, String(header.siteCount));
+    check('sites=64：64 组 trigger / celltag', Object.keys(trig).length === 64 && Object.keys(cells).length === 64,
+      `${Object.keys(trig).length}/${Object.keys(cells).length}`);
+    check('sites=64：落点格互不重复（64 个 celltag 键）', new Set(Object.keys(cells)).size === 64, String(Object.keys(cells).length));
+    check('sites=64：waypoint 编号 16..79 都在字母编码范围（Q…CB）',
+      (header.sites ?? []).every(s => s.w >= 16 && s.w <= 79) && Object.keys(ways).length >= 64,
+      `${(header.sites ?? []).map(s => s.w).slice(0, 3).join(',')}…${(header.sites ?? []).slice(-1)[0]?.w}`);
+    check('sites=64：末档 53 指回第一个点位',
+      (sectionOf(map, 'Actions') ?? {})[`0E00003F`]?.split(',')[11] === '0E000000',
+      (sectionOf(map, 'Actions') ?? {})[`0E00003F`]?.split(',')[11]);
   }
 
   // 4. randomize
@@ -236,7 +275,7 @@ async function run() {
       [{ ...BASE_BODY, ionStorm: { enabled: true, intervalSeconds: 5 } }, 'intervalSeconds 太小'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, intervalSeconds: 9999 } }, 'intervalSeconds 太大'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, sites: 0 } }, 'sites=0'],
-      [{ ...BASE_BODY, ionStorm: { enabled: true, sites: 13 } }, 'sites=13'],
+      [{ ...BASE_BODY, ionStorm: { enabled: true, sites: 65 } }, 'sites=65'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, values: { damage: 0 } } }, 'values.damage=0'],
       [{ ...BASE_BODY, ionStorm: { enabled: true, values: { nope: 1 } } }, '未知数值键'],
       [{ ...BASE_BODY, ionStorm: { enabled: 'yes' } }, 'enabled 非布尔'],
