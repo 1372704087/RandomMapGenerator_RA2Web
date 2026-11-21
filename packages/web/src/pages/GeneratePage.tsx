@@ -1218,21 +1218,29 @@ export default function GeneratePage() {
               <select
                 id="dayNightStages"
                 value={dayNightStages}
-                onChange={e => setDayNightStages(Number(e.target.value))}
+                onChange={e => {
+                  const n = Number(e.target.value);
+                  setDayNightStages(n);
+                  // 每档至少 30 秒，否则天色会闪；24 档时自动把一轮抬到 720 秒以上
+                  if (dayNightCycle < n * 30) setDayNightCycle(n * 30);
+                }}
               >
-                {[2, 3, 4, 6, 8].map(n => (
+                {[2, 3, 4, 6, 8, 12, 24].map(n => (
                   <option key={n} value={n}>
                     {n} 档
                     {n === 2
                       ? '（白天 / 黑夜）'
                       : n === 4
                         ? '（清晨 / 正午 / 黄昏 / 深夜）'
-                        : ''}
+                        : n === 24
+                          ? '（逐整点走一遍，00…23）'
+                          : ''}
                   </option>
                 ))}
               </select>
               <span className="field-hint">
-                档数越多过渡越平滑，但每档要多写一组触发动作；24 小时按档数等分取点
+                档数越多过渡越细腻，但每档要多写一组触发动作；24 小时按档数等分取点。
+                24 档 = 每个整点切一次，建议一轮 ≥ 1440 秒（每档 1 分钟），否则天色会闪
               </span>
             </div>
 

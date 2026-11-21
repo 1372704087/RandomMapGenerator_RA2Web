@@ -237,6 +237,35 @@ describe('昼夜交替', () => {
     assert.deepEqual(dayNight?.stages.map((s) => s.hour), [18, 6]);
   });
 
+  it('24 档 = 逐整点走一遍（00…23 各一次，不重复）', () => {
+    assert.deepEqual(stageHours(0, 24), Array.from({ length: 24 }, (_, i) => i));
+    assert.deepEqual(stageHours(6, 24).slice(0, 3), [6, 7, 8]);
+    const { iniContent, dayNight } = applyDayNight(
+      BASE,
+      { enabled: true, cycleSeconds: 1440, stages: 24, startHour: 6 },
+      'TEMPERATE',
+      95,
+      89,
+    );
+    const d = dayNight!;
+    assert.equal(d.stages.length, 24);
+    assert.equal(new Set(d.stages.map((s) => s.hour)).size, 24);
+    assert.equal(d.stages.reduce((sum, s) => sum + s.seconds, 0), 1440);
+    assert.ok(d.stages.every((s) => s.seconds === 60));
+    // 24 组 trigger/event/action/tag/celltag 都要写全，且环形链首尾相接
+    const ini = new IniFile(iniContent);
+    for (const name of ['Triggers', 'Events', 'Actions', 'Tags', 'CellTags']) {
+      assert.equal(Object.keys(section(ini, name)).length, 24, name);
+    }
+    const last = (section(ini, 'Actions')[String(DAYNIGHT_TRIGGER_BASE + 23)] ?? '').split(',');
+    // 每个动作占 1(id) + 7 参数 = 8 个字段；数量字段在前 → 53 从 index 33 起、54 从 41 起
+    assert.equal(Number(last[0]), 6);
+    assert.equal(last[33], '53');
+    assert.equal(last[35], String(DAYNIGHT_TRIGGER_BASE));
+    assert.equal(last[41], '54');
+    assert.equal(last[43], String(DAYNIGHT_TRIGGER_BASE + 23));
+  });
+
   it('环境光百分比 = 各档 Ambient × 100', () => {
     const { iniContent, dayNight } = applyDayNight(
       BASE,

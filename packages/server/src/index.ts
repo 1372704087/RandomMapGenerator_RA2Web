@@ -949,7 +949,7 @@ function validateIonStormRequest(ionStorm: IonStormRequest | undefined): string 
  * - `dayNight must be an object`
  * - `dayNight.enabled must be a boolean`
  * - `dayNight.cycleSeconds must be an integer between 60 and 7200`
- * - `dayNight.stages must be an integer between 2 and 8`
+ * - `dayNight.stages must be an integer between 2 and 24`
  * - `dayNight.startHour must be an integer between 0 and 23`
  * - `dayNight.retint must be a boolean`
  */
@@ -981,9 +981,9 @@ function validateDayNightRequest(dayNight: DayNightRequest | undefined): string 
       typeof dayNight.stages !== 'number' ||
       !Number.isInteger(dayNight.stages) ||
       dayNight.stages < 2 ||
-      dayNight.stages > 8
+      dayNight.stages > 24
     ) {
-      return 'dayNight.stages must be an integer between 2 and 8';
+      return 'dayNight.stages must be an integer between 2 and 24';
     }
   }
 

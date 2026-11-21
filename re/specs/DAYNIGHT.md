@@ -93,6 +93,19 @@ Level=0.030000
 
 （上面 `[Actions]` 为了可读做了换行，文件里是单行逗号串：`6,73,0,75,0,0,0,0,A,142,…`）
 
+### 逐整点（24 档）
+
+`stages: 24` 时 `stageHours` 就是**每个整点一档**：`startHour` 决定起点，往后每小时一档、绕满 24 小时
+（6 点起 → 06…05），每档的天色就是 24 小时光照表在该整点的值 —— 和手选 `lighting.preset hour=<该整点>`
+逐位相同。
+
+代价与建议：
+
+- 24 组 trigger + 24 个 tag + 24 个 celltag；120×120 图实测 ini 从 319,759 → 324,831 字节（+5,072，约 +1.6%）；
+- 每档时长 = `cycleSeconds / 24`。600 秒一轮只有 25 秒/档，天色会闪；**建议 `cycleSeconds ≥ 1440`（≥60 秒/档）**。
+  前端选 24 档时若一轮低于 `档数 × 30` 会自动抬高（30 秒/档是硬下限），接口侧不额外限制；
+- 仍然只在整点跳变，整点之间没有插值（见第七节「已知限制」）。
+
 ## 三、格式上踩过的三个坑（也是上一版离子风暴的 bug）
 
 ModEnc 三页（`Triggers`、`Events`、`Actions (maps)/RA2YR`）明确写死，之前都没遵守：
@@ -118,7 +131,7 @@ ModEnc 三页（`Triggers`、`Events`、`Actions (maps)/RA2YR`）明确写死，
 |---|---|---|
 | `enabled` | boolean | 不传/false = 只写静态光照，不写任何触发器 |
 | `cycleSeconds` | int 60..7200 | 一轮（白天 + 黑夜）总时长，默认 600 |
-| `stages` | int 2..8 | 关键帧数，默认 4（06/12/18/00 点） |
+| `stages` | int 2..24 | 关键帧数，默认 4（06/12/18/00 点）；24 = 逐整点走一遍 00…23 |
 | `startHour` | int 0..23 | 开局钟点，默认 6 |
 | `retint` | boolean | 是否追加 142/143/144 改 RGB，默认 true |
 
@@ -139,18 +152,19 @@ ModEnc 三页（`Triggers`、`Events`、`Actions (maps)/RA2YR`）明确写死，
 - `dayNight must be an object`
 - `dayNight.enabled must be a boolean`
 - `dayNight.cycleSeconds must be an integer between 60 and 7200`
-- `dayNight.stages must be an integer between 2 and 8`
+- `dayNight.stages must be an integer between 2 and 24`
 - `dayNight.startHour must be an integer between 0 and 23`
 - `dayNight.retint must be a boolean`
 
 ## 五、验收
 
-- `scripts/verify-daynight.mjs`：**44 pass / 0 fail**
+- `scripts/verify-daynight.mjs`：**51 pass / 0 fail**（含 24 档逐整点 6 项）
   （不开启无痕、开局 [Lighting] = 06:00 锚点、4 组 trigger/event/action/tag/celltag、
   `[Events]` 带数量前缀且合计 = 一轮、`[Actions]` 数量 6 且动作顺序 73→142/143/144→53→54、
   六个 P7 都是字母、环形链闭合、百分比 = Ambient×100、retint=false 只剩 3 个动作、
-  上下限边界、与静态光照/离子风暴共存、10 条非法参数 400）
-- core 单测：**238 pass / 0 fail**（其中 `daynight` 15 例）
+  上下限边界、24 档逐整点（00…23 全覆盖、每档 60 秒、24 组 trigger/tag/celltag、首尾相接）、
+  与静态光照/离子风暴共存、10 条非法参数 400）
+- core 单测：**239 pass / 0 fail**（其中 `daynight` 16 例）
 - `scripts/verify-ionstorm.mjs`：**42 pass / 0 fail**、`scripts/verify-lighting.mjs`：**41 pass / 0 fail**
 
 四档天色的静态渲染（同 seed、`lighting.hour` = 6/12/18/0，cncmaps 渲染）：

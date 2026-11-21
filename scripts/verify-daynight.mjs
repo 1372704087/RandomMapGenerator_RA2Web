@@ -202,6 +202,33 @@ async function main() {
     check('stages=2 + startHour=0 → 开局 [Lighting] 是深夜 0.08', l?.Ambient === '0.080000', l?.Ambient);
   }
 
+  // ---------- 4b. 24 档 = 逐整点走一遍 ----------
+  {
+    const r = await generate({
+      ...COMMON, width: 110, height: 110,
+      dayNight: { enabled: true, cycleSeconds: 1440, stages: 24, startHour: 0 },
+    });
+    const h = JSON.parse(r.dayNightHeader);
+    check('24 档被接受', h.stages.length === 24, String(h.stages.length));
+    const hours = h.stages.map(s => s.hour);
+    check('24 档覆盖 00…23 且不重复',
+      new Set(hours).size === 24 && hours.every((v, i) => v === i), hours.join(','));
+    check('24 档 / 1440 秒 → 每档 60 秒', h.stages.every(s => s.seconds === 60), h.stages.map(s => s.seconds).join(','));
+    const trig = sectionOf(r.mapContent, 'Triggers') ?? {};
+    const tags = sectionOf(r.mapContent, 'Tags') ?? {};
+    const cells = sectionOf(r.mapContent, 'CellTags') ?? {};
+    check('24 组 trigger / tag / celltag 全写全',
+      Object.keys(trig).length === 24 && Object.keys(tags).length === 24 && Object.keys(cells).length === 24,
+      `${Object.keys(trig).length}/${Object.keys(tags).length}/${Object.keys(cells).length}`);
+    check('24 个 celltag 的格子互不相同', Object.keys(cells).length === 24 &&
+      new Set(Object.keys(cells)).size === 24, Object.keys(cells).join(' '));
+    const acts = sectionOf(r.mapContent, 'Actions') ?? {};
+    const last = (acts['16100023'] ?? '').split(',');
+    check('24 档首尾相接（末档 53 指回 16100000）', last[33] === '53' && last[35] === '16100000', last.slice(33, 36).join(','));
+    const mid = (acts['16100012'] ?? '').split(',');
+    check('中段 12 点档环境光 = 100%', mid[3] === '100', mid[3]);
+  }
+
   // ---------- 5. 与光照 / 离子风暴共存 ----------
   {
     const r = await generate({
@@ -228,8 +255,8 @@ async function main() {
     [{ dayNight: { enabled: 'yes' } }, 'dayNight.enabled must be a boolean'],
     [{ dayNight: { enabled: true, cycleSeconds: 5 } }, 'dayNight.cycleSeconds must be an integer between 60 and 7200'],
     [{ dayNight: { enabled: true, cycleSeconds: 999999 } }, 'dayNight.cycleSeconds must be an integer between 60 and 7200'],
-    [{ dayNight: { enabled: true, stages: 1 } }, 'dayNight.stages must be an integer between 2 and 8'],
-    [{ dayNight: { enabled: true, stages: 99 } }, 'dayNight.stages must be an integer between 2 and 8'],
+    [{ dayNight: { enabled: true, stages: 1 } }, 'dayNight.stages must be an integer between 2 and 24'],
+    [{ dayNight: { enabled: true, stages: 99 } }, 'dayNight.stages must be an integer between 2 and 24'],
     [{ dayNight: { enabled: true, startHour: 24 } }, 'dayNight.startHour must be an integer between 0 and 23'],
     [{ dayNight: { enabled: true, startHour: -1 } }, 'dayNight.startHour must be an integer between 0 and 23'],
     [{ dayNight: { enabled: true, retint: 'no' } }, 'dayNight.retint must be a boolean'],

@@ -53,7 +53,7 @@ export interface DayNightOptions {
   enabled?: boolean;
   /** 一轮（白天 + 黑夜）的总时长，秒。 */
   cycleSeconds?: number;
-  /** 关键帧数：2 = 只有白天/黑夜，4 = 清晨/正午/黄昏/深夜，最多 8。 */
+  /** 关键帧数：2 = 只有白天/黑夜，4 = 清晨/正午/黄昏/深夜，24 = 逐整点全走一遍。 */
   stages?: number;
   /** 开局是几点（0..23），默认 6 点日出。 */
   startHour?: number;
@@ -101,7 +101,7 @@ export const DAYNIGHT_DEFAULT_CYCLE = 600;
 
 /** 关键帧数范围。 */
 export const DAYNIGHT_MIN_STAGES = 2;
-export const DAYNIGHT_MAX_STAGES = 8;
+export const DAYNIGHT_MAX_STAGES = 24;
 export const DAYNIGHT_DEFAULT_STAGES = 4;
 
 /** 触发器 ID 起始（纯数字，避免十六进制/十进制解析歧义）。 */
