@@ -316,6 +316,8 @@ export default function GeneratePage() {
   const [validationError, setValidationError] = useState<string | null>(null);
   /** 生成结果的雷达预览 */
   const [genPreview, setGenPreview] = useState<MapPreviewData | null>(null);
+  /** 生成成功后的地图文本与文件名：不自动弹下载，等用户点「下载」按钮 */
+  const [mapDownload, setMapDownload] = useState<{ mapText: string; filename: string } | null>(null);
   /** 大图查看器（灯箱） */
   const [lightbox, setLightbox] = useState<{ preview: MapPreviewData; title: string } | null>(null);
   /** cncmaps 渲染预览 */
@@ -615,6 +617,21 @@ export default function GeneratePage() {
     return result;
   }
 
+  /** 点「下载」按钮才触发地图文本下载 */
+  function downloadMap(): void {
+    if (!mapDownload) return;
+    const blob = new Blob([mapDownload.mapText], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = mapDownload.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 释放 URL
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function clearCncmapsPreview() {
     if (cncmapsUrlRef.current) {
       URL.revokeObjectURL(cncmapsUrlRef.current);
@@ -758,22 +775,12 @@ export default function GeneratePage() {
         throw new Error(msg);
       }
 
-      // 先读文本（预览用），再转 Blob 下载
+      // 先读文本（预览用）；不自动弹下载，存起来等用户点「下载」按钮
       const mapText = await res.text();
-      const blob = new Blob([mapText], { type: 'application/octet-stream' });
       const filename =
         parseFilenameFromHeader(res.headers.get('Content-Disposition')) ||
         `${mapName.trim() || 'map'}.yrm`;
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      // 释放 URL
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setMapDownload({ mapText, filename });
 
       fetchMapPreviews([mapText])
         .then(([p]) => setGenPreview(p ?? null))
@@ -1564,6 +1571,13 @@ export default function GeneratePage() {
         )}
         {status.kind === 'success' && (
           <div className="status status-success">{status.message}</div>
+        )}
+        {status.kind === 'success' && mapDownload && (
+          <div className="preview-block">
+            <button className="btn-secondary" onClick={downloadMap}>
+              下载 {mapDownload.filename}
+            </button>
+          </div>
         )}
         {status.kind === 'success' && genPreview && (
           <div className="preview-block">
