@@ -74,7 +74,7 @@ node scripts/mapunit-rename.mjs --apply    # 执行改名
 | theater | 件 | 地形 | 权重分布 | 重复 |
 |---|---|---|---|---|
 | DESERT | 91 | 80 | `{1:71, 2:9}` | 6（3 组） |
-| DESERT_Islands | 39 | 31 | `{1:16, 2:15}` | 0 |
+| DESERT_Islands | 26 | 18 | `{1:12, 2:6}` | 0 |
 | NEWURBAN | 65 | 53 | `{1:49, 2:3, 4:1}` | 0 |
 | SNOW | 63 | 59 | `{1:20, 2:2, 3:25, 4:10, 9:2}` | 0 |
 | SNOW_Islands | 39 | 31 | `{1:16, 2:15}` | 0 |
@@ -89,6 +89,8 @@ node scripts/mapunit-rename.mjs --apply    # 执行改名
 >   无"崖入水"美术 ⇒ **沙滩岛**：全图压平 z→0，WCliff(15)/WaterCaves(57)/瀑布/沉船
 >   走翼区克隆（Cliff piece 22..27 沙漠无 subtile 美术，fold 71..76→65..70），水线
 >   由单元自带的 Shore Pieces 自然衔接。零黑面零空洞。
+> - 2026-11-22 用户手修全部单元后删除 13 个问题件（bhut×7/bunk/farm/msc_ABBB/trees×3），
+>   剩 26 件；若重跑 --apply 会从温带源恢复全 41 件，删除需重做。
 
 label 分布：`trees×105`、`spawn×26`、`newy×22`、`ovl×19`、`bhut×17`、`oild×14`、`bunk×13`、`park×12`、`farm×9`、`tiberium×8`、`mach×8`、`airp×8`，其余 20 类均 ≤6。
 
