@@ -661,6 +661,21 @@ export class WorkingMap {
     const absMapUnit = WorkingMap.GetAbstractMapUnitByName(mapUnitName);
     WorkingMap.AbstractMapMemberMatrix[x][y].Placed = true;
 
+    // 空槽位（填充失败的兜底）高度自适应：逐列取北邻槽位末行的 Z，
+    // 让空槽位融入周边台地高度——否则 empty.map 的 z≤4 平地与 z8 城市台地
+    // 交界会形成 ≥4 级落差且无立面美术，渲染为黑色竖带。
+    const northZ: number[] = [];
+    const isAdaptive = mapUnitName === 'empty';
+    if (isAdaptive) {
+      for (let i = 0; i < WorkingMap.MapUnitWidth; i++) {
+        const nx = x * WorkingMap.MapUnitWidth + i;
+        const ny = y * WorkingMap.MapUnitHeight - 1;
+        const above =
+          WorkingMap.IsValidAT(nx, ny) ? WorkingMap.AbsTile[nx]?.[ny] : null;
+        northZ.push(above ? above.Z : 0);
+      }
+    }
+
     for (let i = 0; i < WorkingMap.MapUnitWidth; i++) {
       for (let j = 0; j < WorkingMap.MapUnitHeight; j++) {
         if (
@@ -674,7 +689,7 @@ export class WorkingMap {
           absTile.SetProperty(
             x * WorkingMap.MapUnitWidth + i,
             y * WorkingMap.MapUnitHeight + j,
-            0,
+            isAdaptive ? Math.max(0, northZ[i] - (absTileType?.Z ?? 0)) : 0,
             absTileType,
           );
           WorkingMap.AbsTile[x * WorkingMap.MapUnitWidth + i][
@@ -1128,6 +1143,56 @@ export class WorkingMap {
             const tile = new AbstractTile();
             tile.SetProperty(mx, my, 0, wing);
             WorkingMap.AbsTile[mx][my] = tile;
+          }
+        }
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // 高度台阶调和：相邻槽位交界 ≥2 级落差且两侧均为无立面平地 ⇒
+    // 低侧逐行/列抬升成 ≤1 级台阶，消除无立面黑带。
+    // 有立面美术（悬崖等）的边界不处理——立面美术本就覆盖大落差。
+    // ---------------------------------------------------------------------
+    for (let x = 0; x < WorkingMap.AbstractMapMemberMatrix.length; x++) {
+      for (let y = 0; y < WorkingMap.AbstractMapMemberMatrix[x].length; y++) {
+        // 南边界:(x,y) 末行(高) vs (x,y+1) 首行(低)
+        for (let i = 0; i < WorkingMap.MapUnitWidth; i++) {
+          const hx = x * W + i;
+          const hy = (y + 1) * H - 1;
+          const ly = (y + 1) * H;
+          if (!WorkingMap.IsValidAT(hx, hy) || !WorkingMap.IsValidAT(hx, ly)) continue;
+          const high = WorkingMap.AbsTile[hx]?.[hy];
+          if (!high || WorkingMap.IsFaceTile(high.TileNum)) continue;
+          const drop = high.Z - (WorkingMap.AbsTile[hx]?.[ly]?.Z ?? 0);
+          if (drop < 2) continue;
+          for (let k = 0; k < drop - 1; k++) {
+            const ty = ly + k;
+            if (!WorkingMap.IsValidAT(hx, ty)) break;
+            const cell = WorkingMap.AbsTile[hx]?.[ty];
+            if (!cell || WorkingMap.IsFaceTile(cell.TileNum)) break;
+            const nz = high.Z - 1 - k;
+            if (cell.Z >= nz) break;
+            cell.Z = nz;
+          }
+        }
+        // 东边界:(x,y) 末列(高) vs (x+1,y) 首列(低)
+        for (let j = 0; j < WorkingMap.MapUnitHeight; j++) {
+          const hy = y * H + j;
+          const hx = (x + 1) * W - 1;
+          const lx = (x + 1) * W;
+          if (!WorkingMap.IsValidAT(hx, hy) || !WorkingMap.IsValidAT(lx, hy)) continue;
+          const high = WorkingMap.AbsTile[hx]?.[hy];
+          if (!high || WorkingMap.IsFaceTile(high.TileNum)) continue;
+          const drop = high.Z - (WorkingMap.AbsTile[lx]?.[hy]?.Z ?? 0);
+          if (drop < 2) continue;
+          for (let k = 0; k < drop - 1; k++) {
+            const tx = lx + k;
+            if (!WorkingMap.IsValidAT(tx, hy)) break;
+            const cell = WorkingMap.AbsTile[tx]?.[hy];
+            if (!cell || WorkingMap.IsFaceTile(cell.TileNum)) break;
+            const nz = high.Z - 1 - k;
+            if (cell.Z >= nz) break;
+            cell.Z = nz;
           }
         }
       }
