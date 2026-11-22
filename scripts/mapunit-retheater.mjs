@@ -67,90 +67,98 @@ function parseSets(file) {
 }
 
 const temp = parseSets(path.join(THEATER_DIR, 'temperatmd.ini'));
-const snow = parseSets(path.join(THEATER_DIR, 'snowmd.ini'));
+
+/**
+ * 目标 theater 的重映射配置。
+ *
+ * SNOW：温/雪 set 0..30 的 TilesInSet 一致（恒等段），31 起雪地插入 Ice 系列
+ *       整体错位 ⇒ 按「同一套美术」手工配对（已用 cncmaps 源码核对扁平索引语义）。
+ * DESERT：set 结构与温带完全同构（同名同 TilesInSet），只是 15 个水景装饰集为空
+ *       （WCliff/瀑布/水洞/残骸）⇒ 全恒等；WCliff（岛屿入水悬崖）映射到普通
+ *       Cliff Set，空集内容走水面克隆。
+ */
+const PROFILES = {
+  SNOW: {
+    donorIni: 'snowmd.ini',
+    // 温带 set → 雪地 set（0..30 恒等 + 31 起错位配对）
+    pairs: new Map([
+      ...[
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+        24, 25, 26, 27, 28, 29, 30,
+      ].map((i) => [i, i]),
+      [33, 62], [34, 63], [35, 40], [36, 38], [37, 39], [38, 69], [39, 70], [40, 71],
+      [41, 64], [42, 65], [43, 41], [44, 42], [45, 43], [46, 68], [47, 44], [48, 45],
+      [49, 54], [50, 55], [51, 56], [52, 46], [53, 47], [54, 48], [55, 49], [56, 61],
+      [57, 37], [58, 50], [59, 51], [60, 52], [61, 53], [62, 54], [63, 55], [64, 56],
+      [65, 57], [66, 58], [67, 58], [68, 59], [69, 60], [70, 70], [72, 66], [73, 67],
+      [74, 62], [75, 65], [76, 72], [77, 40], [78, 67], [79, 67], [80, 73], [81, 60],
+    ]),
+    // 雪地无对应美术（多格大块/零售 MIX 缺贴图）→ 邻域克隆：57 水洞、81 沉船、
+    // 49/50/51/62/65 瀑布系（仅 cannotplacesmudge 用到，防御性）
+    replaceWithWater: new Set([57, 81, 49, 50, 51, 62, 65]),
+    waterfallCloneSets: new Set([49, 50, 51, 62, 65]),
+    // 邻域克隆的 donor 扁平范围（温雪同构恒等段）
+    donorRanges: [
+      [314, 327], // set 21 Water
+      [148, 175], // set 15 Cliff/Water pieces
+      [49, 88], // set 10 Cliff Set
+      [89, 130], // set 12 Shore Pieces
+    ],
+    waterRange: [314, 327], // set 21 Water
+    deepWater: { tn: 318, st: 2, z: 0 },
+    fold: (tn) => tn,
+  },
+  DESERT: {
+    donorIni: 'desertmd.ini',
+    // 沙漠 set 结构与温带同构（同名同数），全恒等；唯一例外：
+    // set 15 Cliff/Water pieces（岛屿入水悬崖，n=28）沙漠为空集
+    // ⇒ 映射到普通 Cliff Set（10，n=40，偏移保持）——沙漠版岛屿水线呈岩崖入海。
+    pairs: new Map(
+      Array.from({ length: 82 }, (_, i) => [i, i]).map(([i]) => [i, i === 15 ? 10 : i]),
+    ),
+    // 沙漠空集（无对应美术）→ 水面克隆：Waterfalls A-D、Water Caves、
+    // ZMM Waterfalls/WaterCaves、RA2 rubble、uss arizona
+    replaceWithWater: new Set([15, 30, 49, 50, 51, 57, 62, 63, 64, 65, 66, 67, 77, 78, 79, 81]),
+    waterfallCloneSets: new Set([15, 49, 50, 51, 62, 63, 64, 65, 66, 67]),
+    // donor 扁平范围（沙漠版恒等段；注意 set 15 空集使 16+ 的 base 前移）
+    donorRanges: [
+      [286, 299], // set 21 Water
+      [49, 88], // set 10 Cliff Set
+      [89, 130], // set 12 Shore Pieces
+    ],
+    waterRange: [286, 299], // set 21 Water
+    deepWater: { tn: 290, st: 2, z: 0 },
+    // 沙漠 Cliff Set 的 piece 22..27 无对应 subtile 美术（trace 实证：
+    // 该区间格全部不绘制）⇒ 折叠到 16..21（tn 71..76 → 65..70）
+    fold: (tn) => (tn >= 71 && tn <= 76 ? tn - 6 : tn),
+  },
+};
+
+const PROFILE_KEY = getArg('--theater', TARGET.includes('DESERT') ? 'DESERT' : 'SNOW');
+const profile = PROFILES[PROFILE_KEY];
+if (!profile) {
+  console.error(`未知 --theater ${PROFILE_KEY}（可选：${Object.keys(PROFILES).join('/')}）`);
+  process.exit(1);
+}
+const donor = parseSets(path.join(THEATER_DIR, profile.donorIni));
 
 const targetTheater =
-  sectionKV(fs.readFileSync(path.join(UNITS, TARGET, 'settings.ini'), 'utf8'), 'settings')?.Theater || 'SNOW';
+  sectionKV(fs.readFileSync(path.join(UNITS, TARGET, 'settings.ini'), 'utf8'), 'settings')?.Theater || PROFILE_KEY;
 
+const PAIRS = profile.pairs;
 /**
- * 温带 set → 雪地 set。
- * 0..30：索引本来就对齐（TilesInSet 也一致），全部走恒等。
- * 31+：按 SetName/FileName + TilesInSet 手工配对。
- * 配不上的（温带有、雪地没有对应美术）落到最接近的雪地「地面」集合，宁可少细节也不要黑洞。
+ * 目标 theater 没有对应美术、又不能按 tile 平移解决的 set（多格大块美术 /
+ * 零售 MIX 缺贴图）→ 邻域克隆 (tileNum,subtile,z)，优先级：
+ *   ① 同 z 水面 ② 同 z 悬崖系（保持崖线连续）③ 文件内水面众数。
+ * 注意：岩拱格若直接落回 z=0 水面，身后高台地会失去立面过渡 → 渲染黑洞。
  */
-const PAIRS = new Map([
-  // 恒等段（这些 set 的 TilesInSet 两边完全一致）
-  ...[
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
-    25, 26, 27, 28, 29, 30,
-  ].map(i => [i, i]),
-  // 错位段
-  [33, 62], // LAT Grass Rough [Sandy] n=1        → LAT SnowyRock [sandy] n=1
-  [34, 63], // GrassRough Individual [dlat] n=16  → Rock/Clear LAT [dlat] n=16
-  [35, 40], // Farm Crops [Rough] n=10             → Farmland [Rough] n=10
-  [36, 38], // Paved Road Ends [p_end] n=4         → Paved Road Ends [p_end] n=4
-  [37, 39], // TrainBridges n=16                   → TrainBridges n=16
-  [38, 69], // Pavement [Pave] n=14                → Pavement Detail [Pave] n=14
-  [39, 70], // Pavement Individual [plat] n=16     → Pavement/Clear LAT [plat] n=16
-  [40, 71], // Paved road bits [proadc] n=14      → Paved road bits [proadc] n=14
-  [41, 64], // LAT Sand [Green] n=1                → LAT Icy [green] n=1
-  [42, 65], // Sand Individual [glat] n=16         → Grey/Clear LAT [glat] n=16
-  [43, 41], // Ramp edge fixup [Rmpfx] n=12        → Ramp edge fixup [Rmpfx] n=12
-  [44, 42], // Ramp edge fixup MM [Mrmfx] n=12     → ZMM Ramp edge fixup [Mrmfx] n=12
-  [45, 43], // Water slopes n=0                    → Water slopes n=0
-  [46, 68], // LAT Pavement [Pvclr] n=1            → LAT Pavement [Pvclr] n=1
-  [47, 44], // Paved Road Slopes [Prslpe] n=4      → Paved Road Slopes [Prslpe] n=4
-  [48, 45], // Monorail Slopes n=0                 → Monorail Slopes n=0
-  [49, 54], // Waterfalls-B [W-b-] n=4             → ZMM Waterfalls-B [MWb-] n=4
-  [50, 55], // Waterfalls-C [W-c-] n=4             → ZMM Waterfalls-C [MWc-] n=4
-  [51, 56], // Waterfalls-D [W-d-] n=4             → ZMM Waterfalls-D [MWd-] n=4
-  [52, 46], // Newest MM Height [hyte] n=15        → ZMM Height Pieces [hyte] n=15
-  [53, 47], // Tunnel Floor [tunnel] n=4           → Tunnels [tunnel] n=4
-  [54, 48], // Tunnel Side [tunnex] n=2            → Tunnel Side [tunnex] n=2
-  [55, 49], // TrackTunnel Floor n=0               → TrackTunnel Floor n=0
-  [56, 61], // Destroyable Cliffs [dcliff] n=2     → Destroyable Cliffs [dcliff] n=2
-  [57, 37], // Water Caves [Wcave] n=4（雪地无）   → Waterfalls-D n=4（降级）
-  [58, 50], // ZMM Bendy Dirt Roads [MDrodc] n=24  → ZMM DirtRoads Bendy n=24
-  [59, 51], // ZMM Dirt Road Junctions n=11       → ZMM DirtRoad Junctions n=11
-  [60, 52], // ZMM Straight Dirt Roads n=66       → ZMM DirtRoads Straight n=66
-  [61, 53], // ZMM Shore Pieces n=42              → ZMM Shore Pieces n=42
-  [62, 54], // ZMM Waterfalls [MWa-] n=4          → ZMM Waterfalls-A n=4
-  [63, 55], [64, 56], [65, 57], // ZMM Waterfalls-B/C/D
-  [66, 58], // ZMM Water Caves [MWcave] n=4（雪地无） → ZMM Cliff/Water pieces n=28（只占前 4）
-  [67, 58], // ZMMCliff/Water pieces n=28         → ZMM Cliff/Water pieces n=28
-  [68, 59], // ZMM Water slopes n=0               → ZMM Water slopes n=0
-  [69, 60], // ZMM Water [MWater] n=14            → ZMM Water [MWater] n=14
-  [70, 70], // Scrin Wreckage n=0                 → n=0（无所谓）
-  [72, 66], // DirtTrackTunnel Floor n=0          → DirtTrackTunnel Floor n=0
-  [73, 67], // DirtTunnel Floor [dtunn] n=4       → DirtTunnel Floor [dtunn] n=4
-  [74, 62], // Sand (beach) [Green] n=1           → LAT SnowyRock n=1
-  [75, 65], // Sand (beach) Transitions [glat] 16 → Grey/Clear LAT [glat] n=16
-  [76, 72], // Water bridge [wbrdge] n=2          → Water bridge [wbrdge] n=2
-  [77, 40], // RA2 rubble farm n=8（雪地无）       → Farmland n=10（降级）
-  [78, 67], // RA2 rubble mobile n=2（雪地无）     → DirtTunnel Floor n=4（降级）
-  [79, 67], // RA2 rubble mexican n=5             → 同上
-  [80, 73], // Wood Bridges [Ovrpsb] n=16         → Wood Bridges [Ovrpsb] n=16
-  [81, 60], // RA2 uss arizona n=1（雪地无）       → （占位，实际走水面克隆，见 REPLACE_WITH_WATER）
-]);
-
-/**
- * 雪地没有对应美术、又不能按 tile 平移解决的 set（多格大块美术 / 零售 MIX 缺 ZMM 系贴图）：
- *   57 = Water Caves（水洞口，多格）——41 文件实测渲染纯黑楔形
- *   81 = uss arizona 沉船（15+ subtile 的大块）——渲染纯黑矩形
- * 处理：整条记录改写成「邻域克隆 (tileNum,subtile,z)」，优先级：
- *   ① 同 z 水面（洞口水线格 / 沉船）② 同 z 悬崖系（水洞上排岩拱格，保持崖线连续）
- *   ③ 文件内水面众数（贴可用区边缘的格）。
- * 注意：岩拱格若直接落回 z=0 水面，身后 z=4 的悬崖会失去立面过渡 → 渲染黑洞。
- */
-const REPLACE_WITH_WATER = new Set([57, 81, 49, 50, 51, 62, 65]);
-// donor 候选的扁平范围（全部是温雪同构的恒等段 set）
-const DONOR_RANGES = [
-  [314, 327], // set 21 Water
-  [148, 175], // set 15 Cliff/Water pieces
-  [49, 88], // set 10 Cliff Set
-  [89, 130], // set 12 Shore Pieces
-];
+const REPLACE_WITH_WATER = profile.replaceWithWater;
+// donor 候选的扁平范围（目标 theater 里恒等/可用的立面集合）
+const DONOR_RANGES = profile.donorRanges;
 const isDonorTile = (tn) => DONOR_RANGES.some(([lo, hi]) => tn >= lo && tn <= hi);
+const WATERFALL_CLONE_SETS = profile.waterfallCloneSets;
+const WATER_TILE_RANGE = profile.waterRange;
+const DEEP_WATER = profile.deepWater;
 
 function setOf(t, flat) {
   for (const s of t.sets) if (s.tiles > 0 && flat >= s.base && flat < s.base + s.tiles) return s;
@@ -164,7 +172,7 @@ function mapTile(tileNum) {
   const off = tileNum - s.base;
   const target = PAIRS.get(s.index);
   if (target === undefined) return { out: tileNum, note: `unpaired-${s.index}` };
-  const ts = snow.byIndex.get(target);
+  const ts = donor.byIndex.get(target);
   if (!ts || ts.tiles === 0) return { out: tileNum, note: `snow-empty-${target}` };
   const clamped = Math.min(off, ts.tiles - 1);
   return { out: ts.base + clamped, note: `set ${s.index}->${target}${clamped !== off ? ' (clamp)' : ''}` };
@@ -181,7 +189,6 @@ function mapTile(tileNum) {
  *     （相位 (x&3) 不变 ⇒ 变体与 donor 相同 ⇒ art 必然存在），崖线/水面剖面逐行保持。
  *   - 沉船(set81)：开阔水面上的多格大块，按邻域水面克隆（水面 tile 各变体图数一致，逐格克隆安全）。
  */
-const WATERFALL_CLONE_SETS = new Set([49, 50, 51, 62, 65]);
 function cloneFromWater(out, affected) {
   const recs = [];
   for (let i = 0; i + 11 <= out.length; i += 11) {
@@ -195,7 +202,7 @@ function cloneFromWater(out, affected) {
     });
   }
   const byPos = new Map(recs.map((r) => [`${r.rx},${r.ry}`, r]));
-  const isWater = (r) => r && r.tn >= 314 && r.tn <= 327;
+  const isWater = (r) => r && r.tn >= WATER_TILE_RANGE[0] && r.tn <= WATER_TILE_RANGE[1];
   const isDonor = (r) => r && isDonorTile(r.tn);
   // 文件内水面 (tileNum,subtile,z) 众数，作为环搜失败时的兜底
   const waterMode = new Map();
@@ -211,7 +218,7 @@ function cloneFromWater(out, affected) {
     donor2 = { tn, st, z };
     break;
   }
-  if (!donor2) donor2 = { tn: 318, st: 2, z: 0 }; // 全局默认：深水（温雪同构 set 21）
+  if (!donor2) donor2 = { ...DEEP_WATER }; // 全局默认：深水
   let cloned = 0;
   let defaulted = 0;
   let failed = 0;
@@ -320,6 +327,12 @@ function replaceIsoSection(text, newB64) {
   return [...lines.slice(0, start + 1), ...chunks, ...lines.slice(end)].join('\r\n');
 }
 
+// 被 mapunit-retheater-verify.mjs 以模块方式 import 时跳过执行体
+export function pairsForTarget(target) {
+  return PROFILES[target.includes('DESERT') ? 'DESERT' : 'SNOW'];
+}
+const IS_MAIN = process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+if (IS_MAIN) {
 const files = [];
 (function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -329,7 +342,7 @@ const files = [];
   }
 })(path.join(UNITS, SOURCE));
 
-console.log(`TEMP ${temp.total} tiles / SNOW ${snow.total} tiles`);
+console.log(`TEMP ${temp.total} tiles / ${PROFILE_KEY} ${donor.total} tiles`);
 let total = 0;
 let changed = 0;
 const notes = new Map();
@@ -369,6 +382,11 @@ for (const srcFile of files) {
       changed += 1;
     }
   }
+  // DESERT 沙滩岛：全图压平到水面（z→0）。沙漠 theater 没有"崖入水"美术，
+  // 高台地与水面的交界必然黑面 ⇒ 岛屿整体落回海平面，水线用 Shore Pieces。
+  if (PROFILE_KEY === 'DESERT') {
+    for (let i = 0; i + 11 <= out.length; i += 11) out[i + 9] = 0;
+  }
   if (affected.length) {
     const { cloned, defaulted, failed } = cloneFromWater(out, affected);
     changed += cloned;
@@ -393,9 +411,44 @@ for (const srcFile of files) {
   if (fileChanged) console.log(`  ${rel}: ${fileChanged} tiles remapped`);
 }
 
+// 目标 theater 的 fold 修正（DESERT：Cliff piece 22..27 无 subtile 美术 → 折叠 16..21）
+if (PROFILE_KEY === 'DESERT') {
+  let folded = 0;
+  for (const rel of written) {
+    const p = path.join(UNITS, TARGET, rel);
+    const t = fs.readFileSync(p, 'utf8');
+    const pack = sectionKV(t, 'IsoMapPack5');
+    if (!pack) continue;
+    const b64 = Object.keys(pack).sort((a, b) => Number(a) - Number(b)).map((k) => pack[k]).join('');
+    const lzo = new Uint8Array(Buffer.from(b64.replace(/[^A-Za-z0-9+/]/g, ''), 'base64'));
+    const size = (sectionKV(t, 'Map') || {}).Size || '0,0,0,0';
+    const s4 = size.split(',').map(Number);
+    const cells = (2 * s4[2] - 1) * s4[3];
+    const big = new Uint8Array(cells * 11 + 4);
+    const n = decodeInto(lzo, big);
+    let fc = 0;
+    for (let i = 0; i + 11 <= n; i += 11) {
+      const tn = big[i + 4] | (big[i + 5] << 8);
+      if (tn === 0xffff) continue;
+      const f = profile.fold(tn);
+      if (f !== tn) {
+        big[i + 4] = f & 0xff;
+        big[i + 5] = (f >>> 8) & 0xff;
+        fc++;
+      }
+    }
+    if (fc) {
+      fs.writeFileSync(p, replaceIsoSection(t, Buffer.from(encode(big.subarray(0, n), 5)).toString('base64')), 'utf8');
+      folded += fc;
+    }
+  }
+  console.log(`  cliff fold(71..76 → 65..70): ${folded} tiles`);
+}
+
 console.log(`\n${files.length} files / ${total} tiles / ${changed} remapped`);
 console.log('\n映射命中：');
 for (const [k, v] of [...notes.entries()].sort((a, b) => b[1] - a[1])) {
   console.log(`  ${String(v).padStart(6)}  ${k}`);
 }
 if (APPLY) console.log(`\n写入 ${written.length} 个文件到 ${TARGET}`);
+}
