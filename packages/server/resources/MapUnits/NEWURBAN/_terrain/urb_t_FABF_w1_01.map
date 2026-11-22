@@ -1,13 +1,29 @@
+; Map created with FinalAlert 2(tm) Mission Editor
+; Get it at http://www.westwood.com
+; note that all comments were truncated
+
 [Header]
-Width=25
-Height=25
+Width=27
+Height=23
+StartX=242
+StartY=22
+Waypoint1=0,0
+Waypoint2=0,0
+Waypoint3=0,0
+Waypoint4=0,0
+Waypoint5=0,0
+Waypoint6=0,0
+Waypoint7=0,0
+Waypoint8=0,0
 NumberStartingPoints=0
+
+[TerrainTypes]
+
 
 [Map]
 Size=0,0,30,30
-LocalSize=2,5,26,21
+LocalSize=1,4,28,23
 Theater=NEWURBAN
-
 [IsoMapPack5]
 1=fwwAIAQBAB4AFgIAYAADAgAdAFgDZAEBAAMAHOsBBAAb6wEFABrrAQYAGesBBwAY6wEIAB
 2=frAQkAFusBCgAV6wELABTrAQwAE+sBDQAS6wEOABHrAQ8AEOsBEAAP6wERAA7rARIADesB
