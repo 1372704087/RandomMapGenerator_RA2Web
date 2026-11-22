@@ -414,6 +414,7 @@ for (const srcFile of files) {
 // 目标 theater 的 fold 修正（DESERT：Cliff piece 22..27 无 subtile 美术 → 折叠 16..21）
 if (PROFILE_KEY === 'DESERT') {
   let folded = 0;
+  let grounded = 0;
   for (const rel of written) {
     const p = path.join(UNITS, TARGET, rel);
     const t = fs.readFileSync(p, 'utf8');
@@ -441,8 +442,48 @@ if (PROFILE_KEY === 'DESERT') {
       fs.writeFileSync(p, replaceIsoSection(t, Buffer.from(encode(big.subarray(0, n), 5)).toString('base64')), 'utf8');
       folded += fc;
     }
+
+    // 悬崖/坡道格压平后无意义（崖壁立面在平地上渲染为黑色斜带）→
+    // 向北（岛内）找最近的非崖/坡/水地面 tile 覆盖；北侧是水则向南找。
+    const posIdx = new Map();
+    for (let i = 0; i + 11 <= n; i += 11) {
+      const rx = big[i] | (big[i + 1] << 8), ry = big[i + 2] | (big[i + 3] << 8);
+      posIdx.set(`${rx},${ry}`, i);
+    }
+    const isCliffish = (tn) =>
+      (tn >= 29 && tn <= 88) || (tn >= 356 && tn <= 375) || tn === 0xffff;
+    const isWater = (tn) => tn >= 286 && tn <= 299;
+    for (let i = 0; i + 11 <= n; i += 11) {
+      const rx = big[i] | (big[i + 1] << 8), ry = big[i + 2] | (big[i + 3] << 8);
+      const tn = big[i + 4] | (big[i + 5] << 8);
+      if (!isCliffish(tn) || tn === 0xffff) continue;
+      let donor = null;
+      for (const dir of [-1, 1]) {
+        for (let k = 1; k <= 40 && !donor; k++) {
+          const c = posIdx.get(`${rx},${ry + dir * k}`);
+          if (c === undefined) break;
+          const ntn = big[c + 4] | (big[c + 5] << 8);
+          if (!isCliffish(ntn) && !isWater(ntn) && !(ntn >= 522 && ntn <= 527) && !(ntn >= 687 && ntn <= 690) && !(ntn >= 710 && ntn <= 725)) donor = c;
+        }
+        if (donor) break;
+      }
+      if (donor !== null) {
+        big[i + 4] = big[donor + 4];
+        big[i + 5] = big[donor + 5];
+        big[i + 8] = big[donor + 8];
+        grounded++;
+      } else {
+        big[i + 4] = 0;
+        big[i + 5] = 0;
+        big[i + 8] = 0;
+        grounded++;
+      }
+    }
+    if (grounded) {
+      fs.writeFileSync(p, replaceIsoSection(t, Buffer.from(encode(big.subarray(0, n), 5)).toString('base64')), 'utf8');
+    }
   }
-  console.log(`  cliff fold(71..76 → 65..70): ${folded} tiles`);
+  console.log(`  cliff fold(71..76 → 65..70): ${folded} tiles / 悬崖坡道落地: ${grounded} tiles`);
 }
 
 console.log(`\n${files.length} files / ${total} tiles / ${changed} remapped`);
